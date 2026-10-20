@@ -492,7 +492,7 @@ export default function ManagerOrderPortal() {
   const fetchRestaurantMenu = async (token: string) => {
     setIsMenuLoading(true);
     try {
-      const res = await fetch('http://localhost:5001/api/menu', {
+      const res = await fetch('https://api.ezydine.in/api/menu', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -525,7 +525,7 @@ export default function ManagerOrderPortal() {
     setIsLoggingIn(true);
 
     try {
-      const res = await fetch('http://localhost:5001/api/auth/manager-login', {
+      const res = await fetch('https://api.ezydine.in/api/auth/manager-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier: loginIdentifier.trim(), pin: loginPin.trim() }),
@@ -806,7 +806,7 @@ export default function ManagerOrderPortal() {
   // Auto-discover and connect real CUPS / OS hardware thermal printers
   const loadSystemPrinters = async () => {
     try {
-      const res = await fetch('http://localhost:5001/api/print/printers');
+      const res = await fetch('https://api.ezydine.in/api/print/printers');
       const data = await res.json();
       if (data.success && Array.isArray(data.printers) && data.printers.length > 0) {
         const discoveredPrinters: RealPrinterDevice[] = data.printers.map((p: any) => ({
@@ -912,13 +912,13 @@ export default function ManagerOrderPortal() {
       prev.map((t) =>
         t.id === selectedTable.id
           ? {
-              ...t,
-              status: 'occupied',
-              activeItemsCount: cart.reduce((s, i) => s + i.quantity, 0),
-              activeTotal: total,
-              kotToken: token,
-              placedAt: nowTime,
-            }
+            ...t,
+            status: 'occupied',
+            activeItemsCount: cart.reduce((s, i) => s + i.quantity, 0),
+            activeTotal: total,
+            kotToken: token,
+            placedAt: nowTime,
+          }
           : t
       )
     );
@@ -1043,7 +1043,7 @@ export default function ManagerOrderPortal() {
     // Optionally sync to backend
     if (managerSession) {
       try {
-        fetch('http://localhost:5001/api/bills', {
+        fetch('https://api.ezydine.in/api/bills', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1163,7 +1163,7 @@ export default function ManagerOrderPortal() {
         return;
       }
 
-      const res = await fetch('http://localhost:5001/api/print', {
+      const res = await fetch('https://api.ezydine.in/api/print', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1203,7 +1203,7 @@ export default function ManagerOrderPortal() {
     playReceiptChime();
     setPrintStatusMessage(`Sending test slip to ${activePrinter.name}...`);
     try {
-      const res = await fetch('http://localhost:5001/api/print', {
+      const res = await fetch('https://api.ezydine.in/api/print', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1227,7 +1227,7 @@ export default function ManagerOrderPortal() {
   // Master Admin API Handlers
   const loadMasterOtps = async () => {
     try {
-      const res = await fetch('http://localhost:5001/api/master/otps');
+      const res = await fetch('https://api.ezydine.in/api/master/otps');
       const data = await res.json();
       if (data.success && data.otps) {
         setMasterOtps(data.otps);
@@ -1240,7 +1240,7 @@ export default function ManagerOrderPortal() {
   const loadMasterAppLogins = async () => {
     setIsMasterLoading(true);
     try {
-      const res = await fetch('http://localhost:5001/api/master/app-logins');
+      const res = await fetch('https://api.ezydine.in/api/master/app-logins');
       const data = await res.json();
       if (data.success && data.logins) {
         setMasterAppLogins(data.logins);
@@ -1270,7 +1270,7 @@ export default function ManagerOrderPortal() {
 
     setIsCreatingLogin(true);
     try {
-      const res = await fetch('http://localhost:5001/api/master/create-app-login', {
+      const res = await fetch('https://api.ezydine.in/api/master/create-app-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1306,7 +1306,7 @@ export default function ManagerOrderPortal() {
   const handleDeleteAppLogin = async (userId: number, name: string) => {
     if (!confirm(`Are you sure you want to remove app login for ${name}?`)) return;
     try {
-      const res = await fetch(`http://localhost:5001/api/master/app-logins/${userId}`, {
+      const res = await fetch(`https://api.ezydine.in/api/master/app-logins/${userId}`, {
         method: 'DELETE',
       });
       const data = await res.json();
@@ -1359,7 +1359,7 @@ export default function ManagerOrderPortal() {
     }
     const isVeg = confirm(`Is "${dishName.trim()}" Vegetarian?\nClick OK for Pure Veg, Cancel for Non-Veg.`);
     try {
-      const res = await fetch('http://localhost:5001/api/menu', {
+      const res = await fetch('https://api.ezydine.in/api/menu', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1571,11 +1571,10 @@ export default function ManagerOrderPortal() {
             <div className="hidden md:flex items-center bg-[#F1F5F9] p-1 rounded-xl ml-4">
               <button
                 onClick={() => setCurrentView('pos')}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  currentView === 'pos'
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${currentView === 'pos'
                     ? 'bg-white text-[#0B1B29] shadow-xs'
                     : 'text-[#64748B] hover:text-[#0B1B29]'
-                }`}
+                  }`}
               >
                 <UtensilsCrossed className="w-4 h-4 text-[#D92F43]" />
                 <span>POS Floor & Tables</span>
@@ -1588,11 +1587,10 @@ export default function ManagerOrderPortal() {
 
               <button
                 onClick={() => setCurrentView('history')}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  currentView === 'history'
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${currentView === 'history'
                     ? 'bg-white text-[#0B1B29] shadow-xs'
                     : 'text-[#64748B] hover:text-[#0B1B29]'
-                }`}
+                  }`}
               >
                 <History className="w-4 h-4 text-[#2563EB]" />
                 <span>Order History & Reprints</span>
@@ -1607,11 +1605,10 @@ export default function ManagerOrderPortal() {
                   loadMasterOtps();
                   loadMasterAppLogins();
                 }}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  currentView === 'master'
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${currentView === 'master'
                     ? 'bg-white text-[#0B1B29] shadow-xs'
                     : 'text-[#64748B] hover:text-[#0B1B29]'
-                }`}
+                  }`}
               >
                 <Key className="w-4 h-4 text-[#D97706]" />
                 <span>Master Admin</span>
@@ -1681,17 +1678,15 @@ export default function ManagerOrderPortal() {
         <div className="flex md:hidden border-t border-[#E2E8F0] bg-[#F8FAFC] p-2 gap-2">
           <button
             onClick={() => setCurrentView('pos')}
-            className={`flex-1 py-2 rounded-lg text-xs font-bold text-center ${
-              currentView === 'pos' ? 'bg-[#0B1B29] text-white' : 'text-[#64748B]'
-            }`}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold text-center ${currentView === 'pos' ? 'bg-[#0B1B29] text-white' : 'text-[#64748B]'
+              }`}
           >
             Floor Tables ({occupiedTablesList.length})
           </button>
           <button
             onClick={() => setCurrentView('history')}
-            className={`flex-1 py-2 rounded-lg text-xs font-bold text-center ${
-              currentView === 'history' ? 'bg-[#0B1B29] text-white' : 'text-[#64748B]'
-            }`}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold text-center ${currentView === 'history' ? 'bg-[#0B1B29] text-white' : 'text-[#64748B]'
+              }`}
           >
             History ({orderHistory.length})
           </button>
@@ -1701,9 +1696,8 @@ export default function ManagerOrderPortal() {
               loadMasterOtps();
               loadMasterAppLogins();
             }}
-            className={`flex-1 py-2 rounded-lg text-xs font-bold text-center ${
-              currentView === 'master' ? 'bg-[#0B1B29] text-white' : 'text-[#64748B]'
-            }`}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold text-center ${currentView === 'master' ? 'bg-[#0B1B29] text-white' : 'text-[#64748B]'
+              }`}
           >
             Master Admin
           </button>
@@ -1746,13 +1740,12 @@ export default function ManagerOrderPortal() {
                     <button
                       key={t.id}
                       onClick={() => handleSelectTable(t)}
-                      className={`shrink-0 flex flex-col items-center justify-center px-4 py-2.5 rounded-xl border text-xs transition-all relative ${
-                        isSelected
+                      className={`shrink-0 flex flex-col items-center justify-center px-4 py-2.5 rounded-xl border text-xs transition-all relative ${isSelected
                           ? 'border-[#0B1B29] bg-[#0B1B29] text-white shadow-md'
                           : isOccupied
-                          ? 'border-[#FECDD3] bg-[#FFF1F2] text-[#0B1B29] hover:border-[#D92F43]'
-                          : 'border-[#E2E8F0] bg-white text-[#0B1B29] hover:border-[#CBD5E1]'
-                      }`}
+                            ? 'border-[#FECDD3] bg-[#FFF1F2] text-[#0B1B29] hover:border-[#D92F43]'
+                            : 'border-[#E2E8F0] bg-white text-[#0B1B29] hover:border-[#CBD5E1]'
+                        }`}
                     >
                       {/* Active Order Indicator Dot */}
                       {isOccupied && !isSelected && (
@@ -1770,11 +1763,10 @@ export default function ManagerOrderPortal() {
                       {/* Display Active Items Count & Amount placed on this table to the manager */}
                       {isOccupied && (
                         <div
-                          className={`mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
-                            isSelected
+                          className={`mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${isSelected
                               ? 'bg-white/20 text-white'
                               : 'bg-[#D92F43] text-white'
-                          }`}
+                            }`}
                         >
                           {t.activeItemsCount} items • ₹{t.activeTotal}
                         </div>
@@ -1795,11 +1787,10 @@ export default function ManagerOrderPortal() {
                     <button
                       key={cat}
                       onClick={() => setSelectedCategory(cat)}
-                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all capitalize whitespace-nowrap ${
-                        selectedCategory === cat
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all capitalize whitespace-nowrap ${selectedCategory === cat
                           ? 'bg-[#D92F43] text-white shadow-xs'
                           : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#0B1B29] hover:bg-[#E2E8F0]'
-                      }`}
+                        }`}
                     >
                       {cat}
                     </button>
@@ -1870,14 +1861,12 @@ export default function ManagerOrderPortal() {
                           <div className="flex items-center justify-between gap-2 mb-1.5">
                             <div className="flex items-center gap-1.5">
                               <span
-                                className={`w-3 h-3 rounded-full border flex items-center justify-center ${
-                                  dish.isVeg ? 'border-[#16A34A]' : 'border-[#D92F43]'
-                                }`}
+                                className={`w-3 h-3 rounded-full border flex items-center justify-center ${dish.isVeg ? 'border-[#16A34A]' : 'border-[#D92F43]'
+                                  }`}
                               >
                                 <span
-                                  className={`w-1.5 h-1.5 rounded-full ${
-                                    dish.isVeg ? 'bg-[#16A34A]' : 'bg-[#D92F43]'
-                                  }`}
+                                  className={`w-1.5 h-1.5 rounded-full ${dish.isVeg ? 'bg-[#16A34A]' : 'bg-[#D92F43]'
+                                    }`}
                                 />
                               </span>
                               <span className="font-bold text-xs text-[#0B1B29] group-hover:text-[#D92F43] transition-colors">
@@ -2048,11 +2037,10 @@ export default function ManagerOrderPortal() {
                 <button
                   type="button"
                   onClick={() => setSelectedPaymentMethod('Cash')}
-                  className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all border ${
-                    selectedPaymentMethod === 'Cash'
+                  className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedPaymentMethod === 'Cash'
                       ? 'border-[#16A34A] bg-[#F0FDF4] text-[#16A34A] shadow-xs'
                       : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
-                  }`}
+                    }`}
                 >
                   <Banknote className="w-3.5 h-3.5" />
                   <span>Cash</span>
@@ -2061,11 +2049,10 @@ export default function ManagerOrderPortal() {
                 <button
                   type="button"
                   onClick={() => setSelectedPaymentMethod('UPI')}
-                  className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all border ${
-                    selectedPaymentMethod === 'UPI'
+                  className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedPaymentMethod === 'UPI'
                       ? 'border-[#2563EB] bg-[#EFF6FF] text-[#2563EB] shadow-xs'
                       : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
-                  }`}
+                    }`}
                 >
                   <QrCode className="w-3.5 h-3.5" />
                   <span>UPI / QR</span>
@@ -2074,11 +2061,10 @@ export default function ManagerOrderPortal() {
                 <button
                   type="button"
                   onClick={() => setSelectedPaymentMethod('Card')}
-                  className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all border ${
-                    selectedPaymentMethod === 'Card'
+                  className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedPaymentMethod === 'Card'
                       ? 'border-[#7C3AED] bg-[#F5F3FF] text-[#7C3AED] shadow-xs'
                       : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
-                  }`}
+                    }`}
                 >
                   <CreditCard className="w-3.5 h-3.5" />
                   <span>Card</span>
@@ -2229,22 +2215,20 @@ export default function ManagerOrderPortal() {
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
               <button
                 onClick={() => setHistoryFilterPayment('all')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                  historyFilterPayment === 'all'
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${historyFilterPayment === 'all'
                     ? 'bg-[#0B1B29] text-white shadow-xs'
                     : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#0B1B29]'
-                }`}
+                  }`}
               >
                 All Orders ({orderHistory.length})
               </button>
 
               <button
                 onClick={() => setHistoryFilterPayment('Cash')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                  historyFilterPayment === 'Cash'
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${historyFilterPayment === 'Cash'
                     ? 'bg-[#16A34A] text-white shadow-xs'
                     : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#16A34A]'
-                }`}
+                  }`}
               >
                 <Banknote className="w-3.5 h-3.5" />
                 <span>Cash Only</span>
@@ -2252,11 +2236,10 @@ export default function ManagerOrderPortal() {
 
               <button
                 onClick={() => setHistoryFilterPayment('UPI')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                  historyFilterPayment === 'UPI'
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${historyFilterPayment === 'UPI'
                     ? 'bg-[#2563EB] text-white shadow-xs'
                     : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#2563EB]'
-                }`}
+                  }`}
               >
                 <QrCode className="w-3.5 h-3.5" />
                 <span>UPI Only</span>
@@ -2264,11 +2247,10 @@ export default function ManagerOrderPortal() {
 
               <button
                 onClick={() => setHistoryFilterPayment('Card')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                  historyFilterPayment === 'Card'
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${historyFilterPayment === 'Card'
                     ? 'bg-[#7C3AED] text-white shadow-xs'
                     : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#7C3AED]'
-                }`}
+                  }`}
               >
                 <CreditCard className="w-3.5 h-3.5" />
                 <span>Card Only</span>
@@ -2381,11 +2363,10 @@ export default function ManagerOrderPortal() {
                       <div className="flex items-center gap-1.5 mt-1 bg-[#F8FAFC] p-1 rounded-xl border border-[#E2E8F0]">
                         <button
                           onClick={() => handleUpdateOrderPaymentMethod(order.id, 'Cash')}
-                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                            isCash
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${isCash
                               ? 'bg-[#16A34A] text-white shadow-xs'
                               : 'text-[#64748B] hover:text-[#0B1B29]'
-                          }`}
+                            }`}
                           title="Set payment mode as Cash"
                         >
                           <Banknote className="w-3.5 h-3.5" />
@@ -2394,11 +2375,10 @@ export default function ManagerOrderPortal() {
 
                         <button
                           onClick={() => handleUpdateOrderPaymentMethod(order.id, 'UPI')}
-                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                            isUPI
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${isUPI
                               ? 'bg-[#2563EB] text-white shadow-xs'
                               : 'text-[#64748B] hover:text-[#0B1B29]'
-                          }`}
+                            }`}
                           title="Set payment mode as UPI"
                         >
                           <QrCode className="w-3.5 h-3.5" />
@@ -2407,11 +2387,10 @@ export default function ManagerOrderPortal() {
 
                         <button
                           onClick={() => handleUpdateOrderPaymentMethod(order.id, 'Card')}
-                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                            isCard
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${isCard
                               ? 'bg-[#7C3AED] text-white shadow-xs'
                               : 'text-[#64748B] hover:text-[#0B1B29]'
-                          }`}
+                            }`}
                           title="Set payment mode as Card"
                         >
                           <CreditCard className="w-3.5 h-3.5" />
@@ -2552,18 +2531,16 @@ export default function ManagerOrderPortal() {
             <div className="flex items-center gap-2 p-1 bg-white border border-[#E2E8F0] rounded-2xl shadow-xs">
               <button
                 onClick={() => setMasterSubTab('otps')}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                  masterSubTab === 'otps'
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${masterSubTab === 'otps'
                     ? 'bg-[#0B1B29] text-white shadow-xs'
                     : 'text-[#64748B] hover:text-[#0B1B29] hover:bg-[#F8FAFC]'
-                }`}
+                  }`}
               >
                 <Smartphone className="w-4 h-4" />
                 <span>Live App Requested OTPs</span>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                    masterSubTab === 'otps' ? 'bg-amber-400 text-black' : 'bg-amber-100 text-amber-800'
-                  }`}
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-black ${masterSubTab === 'otps' ? 'bg-amber-400 text-black' : 'bg-amber-100 text-amber-800'
+                    }`}
                 >
                   {masterOtps.filter((o) => o.status === 'ACTIVE').length} Active
                 </span>
@@ -2574,11 +2551,10 @@ export default function ManagerOrderPortal() {
                   setMasterSubTab('create_login');
                   setCreatedLoginSuccess(null);
                 }}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                  masterSubTab === 'create_login'
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${masterSubTab === 'create_login'
                     ? 'bg-[#0B1B29] text-white shadow-xs'
                     : 'text-[#64748B] hover:text-[#0B1B29] hover:bg-[#F8FAFC]'
-                }`}
+                  }`}
               >
                 <UserPlus className="w-4 h-4" />
                 <span>Create App Login</span>
@@ -2586,11 +2562,10 @@ export default function ManagerOrderPortal() {
 
               <button
                 onClick={() => setMasterSubTab('logins')}
-                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                  masterSubTab === 'logins'
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${masterSubTab === 'logins'
                     ? 'bg-[#0B1B29] text-white shadow-xs'
                     : 'text-[#64748B] hover:text-[#0B1B29] hover:bg-[#F8FAFC]'
-                }`}
+                  }`}
               >
                 <HardDrive className="w-4 h-4" />
                 <span>Registered App Accounts ({masterAppLogins.length})</span>
@@ -2656,9 +2631,8 @@ export default function ManagerOrderPortal() {
                         return (
                           <tr
                             key={otp.id}
-                            className={`hover:bg-[#F8FAFC] transition-colors ${
-                              otp.status === 'ACTIVE' ? 'bg-amber-50/20' : ''
-                            }`}
+                            className={`hover:bg-[#F8FAFC] transition-colors ${otp.status === 'ACTIVE' ? 'bg-amber-50/20' : ''
+                              }`}
                           >
                             <td className="py-4 px-6">
                               <div className="flex items-center gap-2.5">
@@ -2707,11 +2681,10 @@ export default function ManagerOrderPortal() {
                                   setMasterOtpCopied(otp.otpCode);
                                   setTimeout(() => setMasterOtpCopied(null), 2000);
                                 }}
-                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
-                                  isCopied
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs ${isCopied
                                     ? 'bg-emerald-600 text-white'
                                     : 'bg-[#0B1B29] hover:bg-[#1E293B] text-white'
-                                }`}
+                                  }`}
                               >
                                 {isCopied ? (
                                   <>
@@ -3105,21 +3078,19 @@ export default function ManagerOrderPortal() {
               <div className="grid grid-cols-2 gap-2 bg-[#F1F5F9] p-1 rounded-xl">
                 <button
                   onClick={() => handleUpdatePaperWidth('58mm')}
-                  className={`py-2 rounded-lg text-xs font-bold transition-all ${
-                    activePrinter.paperWidth === '58mm'
+                  className={`py-2 rounded-lg text-xs font-bold transition-all ${activePrinter.paperWidth === '58mm'
                       ? 'bg-[#0B1B29] text-white shadow-xs'
                       : 'text-[#64748B] hover:text-[#0B1B29]'
-                  }`}
+                    }`}
                 >
                   58mm (2-inch Pocket Roll)
                 </button>
                 <button
                   onClick={() => handleUpdatePaperWidth('80mm')}
-                  className={`py-2 rounded-lg text-xs font-bold transition-all ${
-                    activePrinter.paperWidth === '80mm'
+                  className={`py-2 rounded-lg text-xs font-bold transition-all ${activePrinter.paperWidth === '80mm'
                       ? 'bg-[#0B1B29] text-white shadow-xs'
                       : 'text-[#64748B] hover:text-[#0B1B29]'
-                  }`}
+                    }`}
                 >
                   80mm (3-inch Counter Roll)
                 </button>
@@ -3218,17 +3189,15 @@ export default function ManagerOrderPortal() {
                       <div
                         key={printer.id}
                         onClick={() => saveAndActivatePrinter(printer)}
-                        className={`cursor-pointer border rounded-xl p-3 flex items-center justify-between transition-all ${
-                          isSelected
+                        className={`cursor-pointer border rounded-xl p-3 flex items-center justify-between transition-all ${isSelected
                             ? 'border-[#16A34A] bg-[#F0FDF4]'
                             : 'border-[#E2E8F0] hover:border-[#CBD5E1] bg-white'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-2.5">
                           <div
-                            className={`w-9 h-9 rounded-lg flex items-center justify-center ${
-                              isSelected ? 'bg-[#DCFCE7] text-[#16A34A]' : 'bg-[#F1F5F9] text-[#0B1B29]'
-                            }`}
+                            className={`w-9 h-9 rounded-lg flex items-center justify-center ${isSelected ? 'bg-[#DCFCE7] text-[#16A34A]' : 'bg-[#F1F5F9] text-[#0B1B29]'
+                              }`}
                           >
                             <Printer className="w-4 h-4" />
                           </div>
@@ -3321,11 +3290,10 @@ export default function ManagerOrderPortal() {
                 <button
                   type="button"
                   onClick={() => setIsTemplateEditorOpen((prev) => !prev)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
-                    isTemplateEditorOpen
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${isTemplateEditorOpen
                       ? 'border-[#D92F43] bg-[#FFF1F2] text-[#D92F43]'
                       : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
-                  }`}
+                    }`}
                   title="Customize Owner Saved Template"
                 >
                   <Settings className="w-3.5 h-3.5" />
@@ -3431,18 +3399,16 @@ export default function ManagerOrderPortal() {
                     <button
                       type="button"
                       onClick={() => setOwnerTemplate((prev) => ({ ...prev, paperWidth: '58mm' }))}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
-                        ownerTemplate.paperWidth === '58mm' ? 'bg-[#0B1B29] text-white' : 'bg-white text-[#64748B] border border-[#E2E8F0]'
-                      }`}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${ownerTemplate.paperWidth === '58mm' ? 'bg-[#0B1B29] text-white' : 'bg-white text-[#64748B] border border-[#E2E8F0]'
+                        }`}
                     >
                       58mm (Pocket)
                     </button>
                     <button
                       type="button"
                       onClick={() => setOwnerTemplate((prev) => ({ ...prev, paperWidth: '80mm' }))}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
-                        ownerTemplate.paperWidth === '80mm' ? 'bg-[#0B1B29] text-white' : 'bg-white text-[#64748B] border border-[#E2E8F0]'
-                      }`}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${ownerTemplate.paperWidth === '80mm' ? 'bg-[#0B1B29] text-white' : 'bg-white text-[#64748B] border border-[#E2E8F0]'
+                        }`}
                     >
                       80mm (Counter)
                     </button>
@@ -3462,9 +3428,8 @@ export default function ManagerOrderPortal() {
             {/* Generated Receipt Slip Preview (Visual Thermal Roll in Owner Template) */}
             <div className="flex-1 overflow-y-auto flex justify-center py-2 bg-[#F1F5F9] rounded-2xl border border-[#E2E8F0] p-4 max-h-[500px]">
               <div
-                className={`bg-white text-black font-mono shadow-md border-t-4 border-b-4 border-dashed border-[#CBD5E1] p-5 transition-all text-xs leading-relaxed ${
-                  ownerTemplate.paperWidth === '58mm' ? 'w-[300px]' : 'w-[380px]'
-                }`}
+                className={`bg-white text-black font-mono shadow-md border-t-4 border-b-4 border-dashed border-[#CBD5E1] p-5 transition-all text-xs leading-relaxed ${ownerTemplate.paperWidth === '58mm' ? 'w-[300px]' : 'w-[380px]'
+                  }`}
               >
                 {generatedPrintData.mode === 'kot' ? (
                   /* KOT Kitchen Order Ticket Template */
