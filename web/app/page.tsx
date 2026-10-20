@@ -1216,22 +1216,22 @@ export default function ManagerOrderPortal() {
       });
 
       const data = await res.json();
-      if (data.success && data.printer && !data.fallbackToBrowser) {
-        setPrintStatusMessage(`✓ Printed directly to ${data.printer || activePrinter.name}`);
+      if (data.success && data.printer) {
+        setPrintStatusMessage(`✓ Printed directly to ${data.printer}`);
+      } else if (data.fallbackToBrowser) {
+        setPrintStatusMessage(`⚠️ ${data.message || 'No CUPS printer on server. Click "Print Slip" for system printer.'}`);
       } else {
-        setPrintStatusMessage('Opening printer system dialog...');
-        setTimeout(() => window.print(), 150);
+        setPrintStatusMessage(`⚠️ Direct print error: ${data.error || 'Failed to dispatch to hardware'}`);
       }
     } catch (err: any) {
-      console.warn('Direct print backend unreachable, falling back to browser print:', err);
-      setPrintStatusMessage('Opening printer system dialog...');
-      setTimeout(() => window.print(), 150);
+      console.warn('Direct print backend unreachable:', err);
+      setPrintStatusMessage(`⚠️ Direct print error: ${err.message || 'Cannot reach local print service'}`);
     } finally {
       setIsDirectPrinting(false);
       setTimeout(() => {
         setIsGeneratePrintOpen(false);
         setPrintStatusMessage(null);
-      }, 1500);
+      }, 2500);
     }
   };
 
@@ -3310,8 +3310,9 @@ export default function ManagerOrderPortal() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="font-extrabold text-base text-[#0B1B29]">Generate Print</h3>
-                    <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-md bg-[#DCFCE7] text-[#16A34A]">
-                      Owner Saved Template
+                    <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-md bg-[#DCFCE7] text-[#16A34A] flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse" />
+                      Auto-Printer: {activePrinter.name}
                     </span>
                   </div>
                   <p className="text-xs text-[#64748B]">
@@ -3676,10 +3677,10 @@ export default function ManagerOrderPortal() {
                   disabled={isDirectPrinting}
                   onClick={handleDirectHardwarePrint}
                   className="flex items-center gap-1.5 bg-[#0B1B29] hover:bg-[#1E293B] text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs disabled:opacity-75"
-                  title="Direct automatic hardware spooling to CUPS server printer"
+                  title={`Direct automatic hardware spooling to ${activePrinter.name}`}
                 >
                   <Printer className={`w-3.5 h-3.5 ${isDirectPrinting ? 'animate-bounce text-[#10B981]' : ''}`} />
-                  <span>{isDirectPrinting ? 'Printing...' : 'Direct Print (Auto)'}</span>
+                  <span>{isDirectPrinting ? 'Sending to Printer...' : `Direct Print: ${activePrinter.name}`}</span>
                 </button>
 
                 <button
