@@ -1,0 +1,26 @@
+export const Colors = {
+  primaryRed: '#D92F43',
+  deepRed: '#B82035',
+  navy: '#0B1B29',
+  background: '#F7F8FA',
+  white: '#FFFFFF',
+  secondaryText: '#64748B',
+  border: '#E2E8F0',
+  successGreen: '#16A34A',
+  warningOrange: '#F59E0B',
+
+  // Semantic & subtle variations
+  primaryRedLight: 'rgba(217, 47, 67, 0.08)',
+  primaryRedBorder: 'rgba(217, 47, 67, 0.2)',
+  warningLight: '#FEF3C7',
+  warningBorder: '#FDE68A',
+  warningDark: '#B45309',
+  cardBg: '#FFFFFF',
+  cardBorder: '#E2E8F0',
+  darkCardBg: '#0B1B29',
+  darkCardBorder: '#1E293B',
+  textPrimary: '#0B1B29',
+  textSecondary: '#64748B',
+  textMuted: '#94A3B8',
+  chartBarLight: '#E2E8F0',
+};

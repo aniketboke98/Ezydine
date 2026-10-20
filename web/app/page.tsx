@@ -1,0 +1,2906 @@
+'use client';
+
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Printer,
+  Search,
+  Plus,
+  Minus,
+  Trash2,
+  CheckCircle2,
+  UtensilsCrossed,
+  Receipt,
+  X,
+  ShieldCheck,
+  ChefHat,
+  User,
+  Phone,
+  HardDrive,
+  Lock,
+  LogOut,
+  Check,
+  AlertCircle,
+  RefreshCw,
+  Bluetooth,
+  Usb,
+  Cpu,
+  History,
+  CreditCard,
+  Banknote,
+  QrCode,
+  ArrowLeft,
+  Clock,
+  Calendar,
+  Filter,
+  DollarSign,
+  TrendingUp,
+  Copy,
+  Settings,
+  Sliders,
+  FileText,
+  Sparkles,
+} from 'lucide-react';
+
+interface MenuItem {
+  id: string | number;
+  name: string;
+  category: string;
+  price: number;
+  isVeg: boolean;
+  isAvailable?: boolean;
+  description: string;
+}
+
+interface CartItem extends MenuItem {
+  quantity: number;
+}
+
+interface Table {
+  id: string | number;
+  number: string;
+  capacity: number;
+  section: string;
+  status: 'available' | 'occupied' | 'billing';
+  activeItemsCount?: number;
+  activeTotal?: number;
+  kotToken?: number;
+  placedAt?: string;
+}
+
+interface TableOrderDraft {
+  cart: CartItem[];
+  specialNote: string;
+  customerName: string;
+  customerPhone: string;
+  kotToken?: number;
+  paymentMethod: 'Cash' | 'UPI' | 'Card';
+  status: 'available' | 'occupied' | 'billing';
+  placedAt?: string;
+}
+
+export interface OrderHistoryItem {
+  id: string;
+  billNumber: string;
+  kotToken: number;
+  tableId: string | number;
+  tableNumber: string;
+  tableSection: string;
+  customerName?: string;
+  customerPhone?: string;
+  serverName: string;
+  items: CartItem[];
+  subtotal: number;
+  discount: number;
+  cgst: number;
+  sgst: number;
+  grandTotal: number;
+  paymentMethod: 'Cash' | 'UPI' | 'Card';
+  createdAt: string;
+  formattedDate: string;
+  formattedTime: string;
+  specialNote?: string;
+  status: 'billed' | 'settled';
+}
+
+interface ManagerSession {
+  token: string;
+  name: string;
+  role: string;
+  identifier: string;
+  restaurantId?: number;
+  restaurantName?: string;
+  restaurantLocation?: string;
+  restaurantPhone?: string;
+  gstNumber?: string;
+  fssai?: string;
+}
+
+export interface RealPrinterDevice {
+  id: string;
+  name: string;
+  connectionType: 'usb' | 'bluetooth' | 'serial' | 'system';
+  paperWidth: '58mm' | '80mm';
+  status: 'connected' | 'paired';
+  vendorId?: number | string;
+  productId?: number | string;
+}
+
+const DEFAULT_FLOOR_TABLES: Table[] = [
+  { id: 't1', number: '01', capacity: 2, section: 'Dine-In', status: 'available' },
+  { id: 't2', number: '02', capacity: 4, section: 'Dine-In', status: 'available' },
+  { id: 't3', number: '03', capacity: 4, section: 'Dine-In', status: 'available' },
+  { id: 't4', number: '04', capacity: 6, section: 'Dine-In', status: 'available' },
+  { id: 't5', number: '05', capacity: 2, section: 'Dine-In', status: 'available' },
+  { id: 't6', number: '06', capacity: 4, section: 'Dine-In', status: 'available' },
+  { id: 't7', number: 'VIP-1', capacity: 8, section: 'VIP Lounge', status: 'available' },
+  { id: 't8', number: 'VIP-2', capacity: 10, section: 'VIP Lounge', status: 'available' },
+  { id: 't9', number: 'T-01', capacity: 4, section: 'Terrace', status: 'available' },
+  { id: 't10', number: 'T-02', capacity: 4, section: 'Terrace', status: 'available' },
+  { id: 't11', number: 'TK-1', capacity: 0, section: 'Takeaway', status: 'available' },
+];
+
+export default function ManagerOrderPortal() {
+  // Navigation & View Mode: 'pos' (floor billing) or 'history' (order history & reprint)
+  const [currentView, setCurrentView] = useState<'pos' | 'history'>('pos');
+
+  // Authentication State
+  const [managerSession, setManagerSession] = useState<ManagerSession | null>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+
+  // Login Form State
+  const [loginIdentifier, setLoginIdentifier] = useState('');
+  const [loginPin, setLoginPin] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // Database-Synced Menu Items for this Manager's Restaurant
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [isMenuLoading, setIsMenuLoading] = useState(false);
+
+  // Tables State & Table Orders Map (Stores active draft/placed order per table)
+  const [floorTables, setFloorTables] = useState<Table[]>(DEFAULT_FLOOR_TABLES);
+  const [tableOrders, setTableOrders] = useState<Record<string, TableOrderDraft>>({});
+  const [selectedTable, setSelectedTable] = useState<Table>(DEFAULT_FLOOR_TABLES[0]);
+
+  // Order & Cart State (Active table's draft)
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [specialNote, setSpecialNote] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'Cash' | 'UPI' | 'Card'>('UPI');
+
+  // Order History State (Persisted in localStorage)
+  const [orderHistory, setOrderHistory] = useState<OrderHistoryItem[]>([]);
+  const [historyFilterPayment, setHistoryFilterPayment] = useState<'all' | 'Cash' | 'UPI' | 'Card'>('all');
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
+
+  // Hardware Printer State
+  const [pairedPrinters, setPairedPrinters] = useState<RealPrinterDevice[]>([]);
+  const [activePrinter, setActivePrinter] = useState<RealPrinterDevice>({
+    id: 'default_system_printer',
+    name: 'Default System Spooler (USB/Network)',
+    connectionType: 'system',
+    paperWidth: '80mm',
+    status: 'connected',
+  });
+  const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
+  const [isScanningPrinter, setIsScanningPrinter] = useState(false);
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [customPrinterName, setCustomPrinterName] = useState('');
+
+  // Print Mode State ('bill' | 'kot') & Print Target Data
+  const [activePrintMode, setActivePrintMode] = useState<'bill' | 'kot'>('bill');
+  const [kotTokenNumber, setKotTokenNumber] = useState<number>(101);
+  const [printStatusMessage, setPrintStatusMessage] = useState<string | null>(null);
+  const [reprintTargetOrder, setReprintTargetOrder] = useState<OrderHistoryItem | null>(null);
+
+  // Owner-Saved Receipt Template Configuration
+  const [ownerTemplate, setOwnerTemplate] = useState<{
+    showLogo: boolean;
+    showGst: boolean;
+    showFssai: boolean;
+    showCashier: boolean;
+    headerText: string;
+    footerText: string;
+    paperWidth: '58mm' | '80mm';
+  }>({
+    showLogo: true,
+    showGst: true,
+    showFssai: true,
+    showCashier: true,
+    headerText: 'Authentic Flavors · Fresh Ingredients',
+    footerText: 'Thank you for dining with us! Visit again.',
+    paperWidth: '80mm',
+  });
+
+  // Dedicated "Generate Print" View in Owner-Saved Template (Replaces automatic system print dialog)
+  const [isGeneratePrintOpen, setIsGeneratePrintOpen] = useState(false);
+  const [generatedPrintData, setGeneratedPrintData] = useState<{
+    mode: 'bill' | 'kot';
+    order: any;
+  } | null>(null);
+  const [isTemplateEditorOpen, setIsTemplateEditorOpen] = useState(false);
+  const [copiedSlip, setCopiedSlip] = useState(false);
+
+  const isInitialLoadedRef = useRef(false);
+
+  // Storage Key Helpers (strictly isolated by restaurant ID)
+  const getTableOrdersKey = (restId?: number | string) =>
+    `ezydine_table_orders_${restId || 'default'}`;
+  const getSelectedTableIdKey = (restId?: number | string) =>
+    `ezydine_selected_table_id_${restId || 'default'}`;
+  const getOwnerTemplateKey = (restId?: number | string) =>
+    `ezydine_owner_template_${restId || 'default'}`;
+
+  // Load saved session, printers, order history, and ACTIVE TABLE ORDERS on mount
+  useEffect(() => {
+    try {
+      const storedSession = localStorage.getItem('ezydine_manager_session');
+      let currentRestId: number | string | undefined = undefined;
+
+      if (storedSession) {
+        const parsed = JSON.parse(storedSession);
+        setManagerSession(parsed);
+        currentRestId = parsed.restaurantId;
+        fetchRestaurantMenu(parsed.token);
+
+        // Load order history for this restaurant
+        const historyKey = `ezydine_order_history_${parsed.restaurantId || 'default'}`;
+        const storedHistory = localStorage.getItem(historyKey);
+        if (storedHistory) {
+          try {
+            setOrderHistory(JSON.parse(storedHistory));
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      // 1. Load saved table orders from localStorage
+      const ordersKey = getTableOrdersKey(currentRestId);
+      const storedTableOrders = localStorage.getItem(ordersKey);
+      let loadedTableOrders: Record<string, TableOrderDraft> = {};
+      if (storedTableOrders) {
+        try {
+          loadedTableOrders = JSON.parse(storedTableOrders);
+          setTableOrders(loadedTableOrders);
+        } catch (e) {
+          console.warn('Failed to parse stored table orders:', e);
+        }
+      }
+
+      // 2. Load saved selected table
+      const selKey = getSelectedTableIdKey(currentRestId);
+      const storedSelectedId = localStorage.getItem(selKey);
+      let initialTable = DEFAULT_FLOOR_TABLES[0];
+      if (storedSelectedId) {
+        const found = DEFAULT_FLOOR_TABLES.find((t) => String(t.id) === String(storedSelectedId));
+        if (found) initialTable = found;
+      }
+      setSelectedTable(initialTable);
+
+      // 3. Restore cart and details for the selected table
+      const draft = loadedTableOrders[initialTable.id];
+      if (draft) {
+        setCart(draft.cart || []);
+        setSpecialNote(draft.specialNote || '');
+        setCustomerName(draft.customerName || '');
+        setCustomerPhone(draft.customerPhone || '');
+        setSelectedPaymentMethod(draft.paymentMethod || 'UPI');
+      }
+
+      // 4. Update floor tables so all tables with items show as occupied with correct count & amount!
+      setFloorTables(
+        DEFAULT_FLOOR_TABLES.map((t) => {
+          const d = loadedTableOrders[t.id];
+          const hasItems = d && d.cart && d.cart.length > 0;
+          const count = hasItems ? d.cart.reduce((sum, item) => sum + item.quantity, 0) : 0;
+          const sub = hasItems ? d.cart.reduce((sum, item) => sum + item.price * item.quantity, 0) : 0;
+          const disc = sub > 500 ? 40 : 0;
+          const tax = Math.max(0, sub - disc);
+          const tot = Math.round(tax + tax * 0.05);
+
+          return {
+            ...t,
+            status: (hasItems ? 'occupied' : 'available') as 'occupied' | 'available',
+            activeItemsCount: count,
+            activeTotal: tot,
+            kotToken: d?.kotToken,
+            placedAt: d?.placedAt,
+          };
+        })
+      );
+
+      // Load saved real paired printers
+      const storedPrinters = localStorage.getItem('ezydine_real_printers');
+      if (storedPrinters) {
+        const parsedPrinters: RealPrinterDevice[] = JSON.parse(storedPrinters);
+        if (Array.isArray(parsedPrinters) && parsedPrinters.length > 0) {
+          setPairedPrinters(parsedPrinters);
+        }
+      }
+
+      const storedActive = localStorage.getItem('ezydine_active_printer');
+      if (storedActive) {
+        setActivePrinter(JSON.parse(storedActive));
+      }
+
+      // 5. Load saved Owner Receipt Template
+      const templateKey = getOwnerTemplateKey(currentRestId);
+      const storedTemplate = localStorage.getItem(templateKey);
+      if (storedTemplate) {
+        try {
+          const parsedTemplate = JSON.parse(storedTemplate);
+          setOwnerTemplate(parsedTemplate);
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // fallback
+    } finally {
+      setIsAuthChecking(false);
+      // Mark as loaded so subsequent modifications trigger auto-saving
+      setTimeout(() => {
+        isInitialLoadedRef.current = true;
+      }, 50);
+    }
+  }, []);
+
+  // Synchronize cart & draft when selectedTable changes
+  const handleSelectTable = (table: Table) => {
+    // 1. Immediately save current table draft before switching
+    if (selectedTable) {
+      const currentDraft: TableOrderDraft = {
+        cart,
+        specialNote,
+        customerName,
+        customerPhone,
+        paymentMethod: selectedPaymentMethod,
+        status: (cart.length > 0 ? 'occupied' : 'available') as 'occupied' | 'available',
+        kotToken: tableOrders[selectedTable.id]?.kotToken,
+        placedAt: tableOrders[selectedTable.id]?.placedAt,
+      };
+      const updated = {
+        ...tableOrders,
+        [selectedTable.id]: currentDraft,
+      };
+      setTableOrders(updated);
+      const ordersKey = getTableOrdersKey(managerSession?.restaurantId);
+      localStorage.setItem(ordersKey, JSON.stringify(updated));
+    }
+
+    // 2. Switch to new table
+    setSelectedTable(table);
+    const selKey = getSelectedTableIdKey(managerSession?.restaurantId);
+    localStorage.setItem(selKey, String(table.id));
+
+    // 3. Load new table's draft
+    const nextDraft = tableOrders[table.id];
+    if (nextDraft) {
+      setCart(nextDraft.cart || []);
+      setSpecialNote(nextDraft.specialNote || '');
+      setCustomerName(nextDraft.customerName || '');
+      setCustomerPhone(nextDraft.customerPhone || '');
+      setSelectedPaymentMethod(nextDraft.paymentMethod || 'UPI');
+    } else {
+      setCart([]);
+      setSpecialNote('');
+      setCustomerName('');
+      setCustomerPhone('');
+      setSelectedPaymentMethod('UPI');
+    }
+  };
+
+  // Live Auto-Save to localStorage whenever cart, notes, or customer details change
+  useEffect(() => {
+    if (!isInitialLoadedRef.current) return;
+
+    const tableId = selectedTable.id;
+    const hasItems = cart.length > 0;
+    const count = cart.reduce((sum, item) => sum + item.quantity, 0);
+    const tableSubtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const tableDiscount = tableSubtotal > 500 ? 40 : 0;
+    const tableTaxable = Math.max(0, tableSubtotal - tableDiscount);
+    const tableTotal = Math.round(tableTaxable + tableTaxable * 0.05);
+
+    setTableOrders((prev) => {
+      let updated: Record<string, TableOrderDraft>;
+      if (!hasItems && !specialNote.trim() && !customerName.trim() && !customerPhone.trim()) {
+        updated = { ...prev };
+        delete updated[tableId];
+      } else {
+        updated = {
+          ...prev,
+          [tableId]: {
+            cart,
+            specialNote,
+            customerName,
+            customerPhone,
+            paymentMethod: selectedPaymentMethod,
+            status: (hasItems ? 'occupied' : 'available') as 'occupied' | 'available',
+            kotToken: prev[tableId]?.kotToken,
+            placedAt: prev[tableId]?.placedAt,
+          },
+        };
+      }
+      const ordersKey = getTableOrdersKey(managerSession?.restaurantId);
+      localStorage.setItem(ordersKey, JSON.stringify(updated));
+      return updated;
+    });
+
+    // Update floor table status live
+    setFloorTables((prev) =>
+      prev.map((t) => {
+        if (t.id === tableId) {
+          return {
+            ...t,
+            status: (hasItems ? 'occupied' : 'available') as 'occupied' | 'available',
+            activeItemsCount: count,
+            activeTotal: hasItems ? tableTotal : 0,
+          };
+        }
+        return t;
+      })
+    );
+
+    const selKey = getSelectedTableIdKey(managerSession?.restaurantId);
+    localStorage.setItem(selKey, String(tableId));
+  }, [cart, specialNote, customerName, customerPhone, selectedPaymentMethod, selectedTable.id, managerSession?.restaurantId]);
+
+  // Save order history helper
+  const saveOrderHistory = (orders: OrderHistoryItem[]) => {
+    setOrderHistory(orders);
+    const historyKey = `ezydine_order_history_${managerSession?.restaurantId || 'default'}`;
+    localStorage.setItem(historyKey, JSON.stringify(orders));
+  };
+
+  // Fetch PostgreSQL Menu Items specifically belonging to this Restaurant
+  const fetchRestaurantMenu = async (token: string) => {
+    setIsMenuLoading(true);
+    try {
+      const res = await fetch('http://localhost:5001/api/menu', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.items)) {
+        setMenuItems(data.items);
+      }
+    } catch (e) {
+      console.warn('Failed to fetch menu items from backend:', e);
+    } finally {
+      setIsMenuLoading(false);
+    }
+  };
+
+  // Handle Manager Login strictly against PostgreSQL database
+  const handleManagerLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginIdentifier.trim()) {
+      setLoginError('Please enter your registered manager phone or email.');
+      return;
+    }
+    if (loginPin.length < 4) {
+      setLoginError('Please enter your 4-digit Manager Access PIN.');
+      return;
+    }
+
+    setLoginError('');
+    setIsLoggingIn(true);
+
+    try {
+      const res = await fetch('http://localhost:5001/api/auth/manager-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: loginIdentifier.trim(), pin: loginPin.trim() }),
+      });
+      const data = await res.json();
+
+      if (data.success && data.manager) {
+        const session: ManagerSession = {
+          token: data.token,
+          name: data.manager.name,
+          role: data.manager.role,
+          identifier: loginIdentifier.trim(),
+          restaurantId: data.restaurant?.id,
+          restaurantName: data.restaurant?.name || 'Restaurant',
+          restaurantLocation: data.restaurant?.location || 'Indiranagar, Bengaluru',
+          restaurantPhone: data.restaurant?.phone || '',
+          gstNumber: data.restaurant?.gstNumber || '29AABCT1332L1Z4',
+          fssai: data.restaurant?.fssai || '11223344556677',
+        };
+        setManagerSession(session);
+        localStorage.setItem('ezydine_manager_session', JSON.stringify(session));
+
+        // Load order history for this specific logged-in restaurant
+        const historyKey = `ezydine_order_history_${session.restaurantId || 'default'}`;
+        const storedHistory = localStorage.getItem(historyKey);
+        if (storedHistory) {
+          try {
+            setOrderHistory(JSON.parse(storedHistory));
+          } catch {
+            // ignore
+          }
+        }
+
+        // Load table orders for this restaurant
+        const ordersKey = getTableOrdersKey(session.restaurantId);
+        const storedTableOrders = localStorage.getItem(ordersKey);
+        let loadedOrders: Record<string, TableOrderDraft> = {};
+        if (storedTableOrders) {
+          try {
+            loadedOrders = JSON.parse(storedTableOrders);
+            setTableOrders(loadedOrders);
+          } catch {
+            // ignore
+          }
+        }
+
+        const selKey = getSelectedTableIdKey(session.restaurantId);
+        const storedSelId = localStorage.getItem(selKey);
+        let curTable = DEFAULT_FLOOR_TABLES[0];
+        if (storedSelId) {
+          const found = DEFAULT_FLOOR_TABLES.find((t) => String(t.id) === String(storedSelId));
+          if (found) curTable = found;
+        }
+        setSelectedTable(curTable);
+        const draft = loadedOrders[curTable.id];
+        if (draft) {
+          setCart(draft.cart || []);
+          setSpecialNote(draft.specialNote || '');
+          setCustomerName(draft.customerName || '');
+          setCustomerPhone(draft.customerPhone || '');
+          setSelectedPaymentMethod(draft.paymentMethod || 'UPI');
+        } else {
+          setCart([]);
+          setSpecialNote('');
+          setCustomerName('');
+          setCustomerPhone('');
+          setSelectedPaymentMethod('UPI');
+        }
+
+        setFloorTables(
+          DEFAULT_FLOOR_TABLES.map((t) => {
+            const d = loadedOrders[t.id];
+            const hasItems = d && d.cart && d.cart.length > 0;
+            const count = hasItems ? d.cart.reduce((sum, item) => sum + item.quantity, 0) : 0;
+            const sub = hasItems ? d.cart.reduce((sum, item) => sum + item.price * item.quantity, 0) : 0;
+            const disc = sub > 500 ? 40 : 0;
+            const tax = Math.max(0, sub - disc);
+            const tot = Math.round(tax + tax * 0.05);
+
+            return {
+              ...t,
+              status: (hasItems ? 'occupied' : 'available') as 'occupied' | 'available',
+              activeItemsCount: count,
+              activeTotal: tot,
+              kotToken: d?.kotToken,
+              placedAt: d?.placedAt,
+            };
+          })
+        );
+
+        // Load saved Owner Receipt Template
+        const templateKey = getOwnerTemplateKey(session.restaurantId);
+        const storedTemplate = localStorage.getItem(templateKey);
+        if (storedTemplate) {
+          try {
+            setOwnerTemplate(JSON.parse(storedTemplate));
+          } catch {
+            // ignore
+          }
+        }
+
+        fetchRestaurantMenu(data.token);
+      } else {
+        setLoginError(
+          data.error ||
+          'Manager account not found or invalid PIN. Please verify credentials or set up Manager PIN in mobile app Staff Management.'
+        );
+      }
+    } catch (err: any) {
+      console.warn('Manager login network issue:', err);
+      setLoginError('Connection error contacting database server. Please check backend connection.');
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogout = () => {
+    if (confirm('Log out from Manager POS portal?')) {
+      setManagerSession(null);
+      localStorage.removeItem('ezydine_manager_session');
+      setCart([]);
+      setTableOrders({});
+      setFloorTables(DEFAULT_FLOOR_TABLES);
+      setSelectedTable(DEFAULT_FLOOR_TABLES[0]);
+      setMenuItems([]);
+      setLoginPin('');
+    }
+  };
+
+  // Hardware Printer Helper
+  const saveAndActivatePrinter = (device: RealPrinterDevice) => {
+    setPairedPrinters((prev) => {
+      const filtered = prev.filter((p) => p.id !== device.id);
+      const updated = [device, ...filtered];
+      localStorage.setItem('ezydine_real_printers', JSON.stringify(updated));
+      return updated;
+    });
+    setActivePrinter(device);
+    localStorage.setItem('ezydine_active_printer', JSON.stringify(device));
+    setScanMessage(`Connected printer: ${device.name}`);
+    setPrintStatusMessage(`Active Printer: ${device.name}`);
+    setTimeout(() => {
+      setScanMessage(null);
+      setPrintStatusMessage(null);
+    }, 3500);
+  };
+
+  // Real USB Printer Scan using WebUSB API
+  const handleScanUsbPrinter = async () => {
+    setIsScanningPrinter(true);
+    setScanError(null);
+    try {
+      if ('usb' in navigator) {
+        const device = await (navigator as any).usb.requestDevice({ filters: [] });
+        const name = device.productName || device.manufacturerName || `USB POS Printer (VID: ${device.vendorId})`;
+        const newPrinter: RealPrinterDevice = {
+          id: `usb_${device.vendorId}_${device.productId}_${Date.now()}`,
+          name,
+          connectionType: 'usb',
+          paperWidth: '80mm',
+          status: 'connected',
+          vendorId: device.vendorId,
+          productId: device.productId,
+        };
+        saveAndActivatePrinter(newPrinter);
+      } else {
+        setScanError('WebUSB is not supported in this browser. Please use Chrome or select System Printer.');
+      }
+    } catch (err: any) {
+      if (err.name !== 'NotFoundError') {
+        setScanError(err.message || 'Failed to detect USB device.');
+      }
+    } finally {
+      setIsScanningPrinter(false);
+    }
+  };
+
+  // Real Bluetooth Printer Scan using Web Bluetooth API
+  const handleScanBluetoothPrinter = async () => {
+    setIsScanningPrinter(true);
+    setScanError(null);
+    try {
+      if ('bluetooth' in navigator) {
+        const device = await (navigator as any).bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb'],
+        });
+        const name = device.name || 'Bluetooth Receipt Printer';
+        const newPrinter: RealPrinterDevice = {
+          id: `bt_${device.id || Date.now()}`,
+          name,
+          connectionType: 'bluetooth',
+          paperWidth: '58mm',
+          status: 'connected',
+        };
+        saveAndActivatePrinter(newPrinter);
+      } else {
+        setScanError('Web Bluetooth is not available in this browser. Please use Chrome/Edge on macOS/Windows/Android.');
+      }
+    } catch (err: any) {
+      if (err.name !== 'NotFoundError') {
+        setScanError(err.message || 'Failed to connect Bluetooth device.');
+      }
+    } finally {
+      setIsScanningPrinter(false);
+    }
+  };
+
+  // Real Serial / COM Port Printer Scan using Web Serial API
+  const handleScanSerialPrinter = async () => {
+    setIsScanningPrinter(true);
+    setScanError(null);
+    try {
+      if ('serial' in navigator) {
+        const port = await (navigator as any).serial.requestPort();
+        const info = port.getInfo ? port.getInfo() : {};
+        const name = `Serial/COM Port Printer (VID: ${info.usbVendorId || 'COM'})`;
+        const newPrinter: RealPrinterDevice = {
+          id: `serial_${Date.now()}`,
+          name,
+          connectionType: 'serial',
+          paperWidth: '80mm',
+          status: 'connected',
+        };
+        saveAndActivatePrinter(newPrinter);
+      } else {
+        setScanError('Web Serial is not available in this browser. Please use Chrome or Edge.');
+      }
+    } catch (err: any) {
+      if (err.name !== 'NotFoundError') {
+        setScanError(err.message || 'Failed to connect Serial port.');
+      }
+    } finally {
+      setIsScanningPrinter(false);
+    }
+  };
+
+  const handleAddSystemPrinter = () => {
+    const name = customPrinterName.trim() || 'Default OS System Printer (Spooler)';
+    const newPrinter: RealPrinterDevice = {
+      id: `sys_${Date.now()}`,
+      name,
+      connectionType: 'system',
+      paperWidth: activePrinter.paperWidth || '80mm',
+      status: 'connected',
+    };
+    saveAndActivatePrinter(newPrinter);
+    setCustomPrinterName('');
+  };
+
+  const handleRemovePrinter = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const updated = pairedPrinters.filter((p) => p.id !== id);
+    setPairedPrinters(updated);
+    localStorage.setItem('ezydine_real_printers', JSON.stringify(updated));
+    if (activePrinter.id === id) {
+      const fallback: RealPrinterDevice = updated[0] || {
+        id: 'default_system_printer',
+        name: 'Default System Spooler (USB/Network)',
+        connectionType: 'system',
+        paperWidth: '80mm',
+        status: 'connected',
+      };
+      setActivePrinter(fallback);
+      localStorage.setItem('ezydine_active_printer', JSON.stringify(fallback));
+    }
+  };
+
+  const handleUpdatePaperWidth = (width: '58mm' | '80mm') => {
+    const updated: RealPrinterDevice = { ...activePrinter, paperWidth: width };
+    setActivePrinter(updated);
+    localStorage.setItem('ezydine_active_printer', JSON.stringify(updated));
+    setPairedPrinters((prev) =>
+      prev.map((p) => (p.id === activePrinter.id ? { ...p, paperWidth: width } : p))
+    );
+  };
+
+  // Cart operations
+  const addToCart = (item: MenuItem) => {
+    setCart((prev) => {
+      const existing = prev.find((i) => i.id === item.id);
+      if (existing) {
+        return prev.map((i) => (i.id === item.id ? { ...i, quantity: i.quantity + 1 } : i));
+      }
+      return [...prev, { ...item, quantity: 1 }];
+    });
+  };
+
+  const updateQuantity = (id: string | number, delta: number) => {
+    setCart((prev) =>
+      prev
+        .map((i) => {
+          if (i.id === id) {
+            const nextQty = i.quantity + delta;
+            return nextQty > 0 ? { ...i, quantity: nextQty } : null;
+          }
+          return i;
+        })
+        .filter(Boolean) as CartItem[]
+    );
+  };
+
+  const clearCart = () => {
+    if (cart.length > 0 && confirm('Clear current order items for this table?')) {
+      setCart([]);
+      setSpecialNote('');
+      setCustomerName('');
+      setCustomerPhone('');
+
+      const updated = { ...tableOrders };
+      delete updated[selectedTable.id];
+      setTableOrders(updated);
+      const ordersKey = getTableOrdersKey(managerSession?.restaurantId);
+      localStorage.setItem(ordersKey, JSON.stringify(updated));
+
+      setFloorTables((prev) =>
+        prev.map((t) =>
+          t.id === selectedTable.id
+            ? { ...t, status: 'available', activeItemsCount: 0, activeTotal: 0, kotToken: undefined, placedAt: undefined }
+            : t
+        )
+      );
+    }
+  };
+
+  // Dynamic Calculations for Active Cart
+  const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const discount = subtotal > 500 ? 40 : 0;
+  const taxable = Math.max(0, subtotal - discount);
+  const cgst = taxable * 0.025;
+  const sgst = taxable * 0.025;
+  const total = Math.round(taxable + cgst + sgst);
+
+  // Mark Order as Placed on Table & Print KOT
+  const handlePrintKOT = () => {
+    if (cart.length === 0) {
+      alert('Order is empty. Please add items before placing order & printing KOT.');
+      return;
+    }
+    const token = kotTokenNumber + 1;
+    setKotTokenNumber(token);
+
+    // 1. Update Table Status to Occupied with active item count and amount
+    const nowTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    setFloorTables((prev) =>
+      prev.map((t) =>
+        t.id === selectedTable.id
+          ? {
+              ...t,
+              status: 'occupied',
+              activeItemsCount: cart.reduce((s, i) => s + i.quantity, 0),
+              activeTotal: total,
+              kotToken: token,
+              placedAt: nowTime,
+            }
+          : t
+      )
+    );
+
+    // 2. Persist in tableOrders
+    setTableOrders((prev) => ({
+      ...prev,
+      [selectedTable.id]: {
+        cart,
+        specialNote,
+        customerName,
+        customerPhone,
+        kotToken: token,
+        paymentMethod: selectedPaymentMethod,
+        status: 'occupied' as const,
+        placedAt: nowTime,
+      },
+    }));
+
+    // 3. Open Generate Print view in Owner-Saved Template (instead of opening system print option!)
+    const printPayload = {
+      billNumber: `KOT #${token}`,
+      kotToken: token,
+      tableNumber: selectedTable.number,
+      tableSection: selectedTable.section,
+      customerName,
+      customerPhone,
+      serverName: managerSession?.name || 'Manager',
+      items: [...cart],
+      subtotal,
+      discount,
+      cgst,
+      sgst,
+      grandTotal: total,
+      paymentMethod: selectedPaymentMethod,
+      formattedDate: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+      formattedTime: nowTime,
+      specialNote,
+    };
+    setReprintTargetOrder(null);
+    setActivePrintMode('kot');
+    setGeneratedPrintData({ mode: 'kot', order: printPayload });
+    setIsGeneratePrintOpen(true);
+    setPrintStatusMessage(`KOT #${token} generated in Owner Saved Template`);
+    setTimeout(() => setPrintStatusMessage(null), 3000);
+  };
+
+  // 1-CLICK BILL RECEIPT GENERATE + AUTO MOVE TO ORDER HISTORY (Owner Saved Template)
+  const handleBillAndPrint = async () => {
+    if (cart.length === 0) {
+      alert('Order is empty. Please add items before generating receipt.');
+      return;
+    }
+
+    const billNum = `BILL #${Math.floor(1000 + Math.random() * 9000)}`;
+    const token = kotTokenNumber + 1;
+    setKotTokenNumber(token);
+
+    const now = new Date();
+    const formattedDate = now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    const formattedTime = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const newOrder: OrderHistoryItem = {
+      id: `ord_${Date.now()}`,
+      billNumber: billNum,
+      kotToken: token,
+      tableId: selectedTable.id,
+      tableNumber: selectedTable.number,
+      tableSection: selectedTable.section,
+      customerName: customerName.trim() || undefined,
+      customerPhone: customerPhone.trim() || undefined,
+      serverName: managerSession?.name || 'Manager',
+      items: [...cart],
+      subtotal,
+      discount,
+      cgst,
+      sgst,
+      grandTotal: total,
+      paymentMethod: selectedPaymentMethod,
+      createdAt: now.toISOString(),
+      formattedDate,
+      formattedTime,
+      specialNote: specialNote.trim() || undefined,
+      status: 'billed',
+    };
+
+    // 1. Add to Order History (persisted)
+    const updatedHistory = [newOrder, ...orderHistory];
+    saveOrderHistory(updatedHistory);
+
+    // 2. Clear this table's occupied status on floor plan and storage
+    setFloorTables((prev) =>
+      prev.map((t) =>
+        t.id === selectedTable.id
+          ? { ...t, status: 'available', activeItemsCount: 0, activeTotal: 0, kotToken: undefined }
+          : t
+      )
+    );
+    const updatedOrders = { ...tableOrders };
+    delete updatedOrders[selectedTable.id];
+    setTableOrders(updatedOrders);
+    const ordersKey = getTableOrdersKey(managerSession?.restaurantId);
+    localStorage.setItem(ordersKey, JSON.stringify(updatedOrders));
+
+    // 3. Clear active cart
+    setCart([]);
+    setSpecialNote('');
+    setCustomerName('');
+    setCustomerPhone('');
+
+    // 4. Set reprint target & switch to history
+    setReprintTargetOrder(newOrder);
+    setActivePrintMode('bill');
+    setCurrentView('history');
+
+    // 5. Open Generate Print in Owner Saved Template (No intrusive system print dialog!)
+    setGeneratedPrintData({ mode: 'bill', order: newOrder });
+    setIsGeneratePrintOpen(true);
+    setPrintStatusMessage(`Bill ${billNum} generated in Owner Saved Template`);
+    setTimeout(() => setPrintStatusMessage(null), 3000);
+
+    // Optionally sync to backend
+    if (managerSession) {
+      try {
+        fetch('http://localhost:5001/api/bills', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${managerSession.token}`,
+          },
+          body: JSON.stringify({
+            tableNumber: selectedTable.number,
+            items: newOrder.items,
+            subtotal: newOrder.subtotal,
+            discount: newOrder.discount,
+            gstAmount: newOrder.cgst + newOrder.sgst,
+            totalAmount: newOrder.grandTotal,
+          }),
+        }).catch((err) => console.warn('Could not sync bill to backend:', err));
+      } catch (e) {
+        // non-blocking
+      }
+    }
+  };
+
+  // Reprint Bill from Order History in Owner Saved Template
+  const handleReprintBill = (order: OrderHistoryItem) => {
+    setReprintTargetOrder(order);
+    setActivePrintMode('bill');
+    setGeneratedPrintData({ mode: 'bill', order });
+    setIsGeneratePrintOpen(true);
+  };
+
+  // Reprint KOT from Order History in Owner Saved Template
+  const handleReprintKOT = (order: OrderHistoryItem) => {
+    setReprintTargetOrder(order);
+    setActivePrintMode('kot');
+    setGeneratedPrintData({ mode: 'kot', order });
+    setIsGeneratePrintOpen(true);
+  };
+
+  // Save Owner Receipt Template helper
+  const handleSaveOwnerTemplate = (updated: typeof ownerTemplate) => {
+    setOwnerTemplate(updated);
+    const key = getOwnerTemplateKey(managerSession?.restaurantId);
+    localStorage.setItem(key, JSON.stringify(updated));
+    setPrintStatusMessage('Owner receipt template saved successfully');
+    setTimeout(() => setPrintStatusMessage(null), 3000);
+    setIsTemplateEditorOpen(false);
+  };
+
+  // Copy Clean Receipt Text to Clipboard
+  const handleCopyReceiptText = () => {
+    if (!generatedPrintData || !managerSession) return;
+    const { mode, order } = generatedPrintData;
+    let text = '';
+    if (mode === 'kot') {
+      text = `*** KITCHEN ORDER TICKET ***\nTOKEN #${order.kotToken}\n${managerSession.restaurantName}\n` +
+        `Table: ${order.tableNumber} (${order.tableSection}) | Server: ${order.serverName}\n` +
+        `Time: ${order.formattedTime} · ${order.formattedDate}\n` +
+        `--------------------------------\n` +
+        order.items.map((i: any) => `[${i.quantity}]  ${i.name} (${i.isVeg ? 'VEG' : 'NON-VEG'})`).join('\n') +
+        `\n--------------------------------\n` +
+        (order.specialNote ? `Chef Note: ${order.specialNote}\n` : '') +
+        `*** SEND TO KITCHEN PREPARATION ***`;
+    } else {
+      text = `${managerSession.restaurantName}\n${managerSession.restaurantLocation}\nPh: ${managerSession.restaurantPhone || ''}\n` +
+        (ownerTemplate.showGst ? `GSTIN: ${managerSession.gstNumber || '29AABCT1332L1Z4'}\n` : '') +
+        (ownerTemplate.showFssai ? `FSSAI: ${managerSession.fssai || '11223344556677'}\n` : '') +
+        `--------------------------------\n` +
+        `${order.billNumber} | Table ${order.tableNumber} (${order.tableSection})\n` +
+        (ownerTemplate.showCashier ? `Cashier: ${order.serverName}\n` : '') +
+        `Date: ${order.formattedDate} ${order.formattedTime}\n` +
+        (order.customerName ? `Guest: ${order.customerName}\n` : '') +
+        `--------------------------------\n` +
+        order.items.map((i: any) => `${i.name} x ${i.quantity} = ₹${(i.price * i.quantity).toFixed(2)}`).join('\n') +
+        `\n--------------------------------\n` +
+        `Subtotal: ₹${order.subtotal.toFixed(2)}\n` +
+        (order.discount > 0 ? `Discount: -₹${order.discount.toFixed(2)}\n` : '') +
+        `CGST (2.5%): ₹${order.cgst.toFixed(2)}\n` +
+        `SGST (2.5%): ₹${order.sgst.toFixed(2)}\n` +
+        `GRAND TOTAL: ₹${order.grandTotal.toFixed(2)}\n` +
+        `Payment Mode: ${order.paymentMethod}\n` +
+        `--------------------------------\n` +
+        `${ownerTemplate.footerText}\n`;
+    }
+    navigator.clipboard.writeText(text);
+    setCopiedSlip(true);
+    setTimeout(() => setCopiedSlip(false), 2000);
+  };
+
+  // Update Payment Method for an existing order in Order History (Cash / UPI / Card)
+  const handleUpdateOrderPaymentMethod = (orderId: string, newMethod: 'Cash' | 'UPI' | 'Card') => {
+    const updated = orderHistory.map((order) => {
+      if (order.id === orderId) {
+        return { ...order, paymentMethod: newMethod };
+      }
+      return order;
+    });
+    saveOrderHistory(updated);
+    setPrintStatusMessage(`Order payment method updated to ${newMethod}`);
+    setTimeout(() => setPrintStatusMessage(null), 2500);
+  };
+
+  // Categories
+  const categories = ['all', ...Array.from(new Set(menuItems.map((m) => m.category.toLowerCase())))];
+
+  // Quick add dish
+  const handleQuickAddDish = async (dishName: string) => {
+    if (!dishName.trim() || !managerSession) return;
+    const priceStr = prompt(`Enter price in ₹ for "${dishName.trim()}":`, '250');
+    if (!priceStr) return;
+    const price = parseFloat(priceStr);
+    if (isNaN(price) || price <= 0) {
+      alert('Please enter a valid price.');
+      return;
+    }
+    const isVeg = confirm(`Is "${dishName.trim()}" Vegetarian?\nClick OK for Pure Veg, Cancel for Non-Veg.`);
+    try {
+      const res = await fetch('http://localhost:5001/api/menu', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${managerSession.token}`,
+        },
+        body: JSON.stringify({
+          name: dishName.trim(),
+          category: selectedCategory === 'all' ? 'Mains' : selectedCategory,
+          price,
+          isVeg,
+          description: '',
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.item) {
+        await fetchRestaurantMenu(managerSession.token);
+        addToCart({
+          id: data.item.id,
+          name: data.item.name,
+          category: data.item.category,
+          price: Number(data.item.price),
+          isVeg: data.item.isVeg,
+          description: data.item.description || '',
+        });
+        setSearchQuery('');
+      } else {
+        alert(data.error || 'Failed to add dish');
+      }
+    } catch (e: any) {
+      alert('Error creating dish: ' + e.message);
+    }
+  };
+
+  // Filter items
+  const filteredItems = menuItems.filter((item) => {
+    const matchesCategory = selectedCategory === 'all' || item.category.toLowerCase() === selectedCategory.toLowerCase();
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return matchesCategory;
+
+    const matchesName = item.name.toLowerCase().includes(query);
+    const matchesId = item.id.toString() === query || `#${item.id}` === query;
+    const matchesDesc = item.description && item.description.toLowerCase().includes(query);
+    return matchesCategory && (matchesName || matchesId || matchesDesc);
+  });
+
+  // Filter Order History
+  const filteredOrderHistory = orderHistory.filter((order) => {
+    const matchesPayment = historyFilterPayment === 'all' || order.paymentMethod === historyFilterPayment;
+    const query = historySearchQuery.trim().toLowerCase();
+    if (!query) return matchesPayment;
+
+    const matchesBill = order.billNumber.toLowerCase().includes(query);
+    const matchesTable = `table ${order.tableNumber}`.toLowerCase().includes(query) || order.tableNumber.toLowerCase().includes(query);
+    const matchesGuest = order.customerName && order.customerName.toLowerCase().includes(query);
+    const matchesItem = order.items.some((i) => i.name.toLowerCase().includes(query));
+    return matchesPayment && (matchesBill || matchesTable || matchesGuest || matchesItem);
+  });
+
+  // Total History Metrics
+  const totalRevenue = orderHistory.reduce((sum, ord) => sum + ord.grandTotal, 0);
+  const totalCash = orderHistory.filter((o) => o.paymentMethod === 'Cash').reduce((s, o) => s + o.grandTotal, 0);
+  const totalUPI = orderHistory.filter((o) => o.paymentMethod === 'UPI').reduce((s, o) => s + o.grandTotal, 0);
+  const totalCard = orderHistory.filter((o) => o.paymentMethod === 'Card').reduce((s, o) => s + o.grandTotal, 0);
+  const occupiedTablesList = floorTables.filter((t) => t.status === 'occupied');
+
+  // Loading spinner
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-[#F7F8FA] flex items-center justify-center">
+        <div className="w-8 h-8 border-3 border-[#D92F43] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // 1. Manager Authentication Screen
+  if (!managerSession) {
+    return (
+      <div className="min-h-screen bg-[#F7F8FA] flex flex-col items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl border border-[#E2E8F0] p-8">
+          <div className="flex flex-col items-center text-center mb-6">
+            <div className="w-14 h-14 rounded-2xl bg-[#D92F43] flex items-center justify-center text-white font-extrabold text-2xl shadow-lg mb-3">
+              ED
+            </div>
+            <h1 className="text-2xl font-extrabold text-[#0B1B29] tracking-tight">EzyDine Manager POS</h1>
+            <p className="text-xs text-[#64748B] mt-1">Multi-Tenant Cloud Billing & Floor Order Management</p>
+          </div>
+
+          <form onSubmit={handleManagerLogin} className="space-y-4">
+            <div>
+              <label className="block text-xs font-bold text-[#0B1B29] uppercase tracking-wider mb-1.5">
+                Manager Mobile or Email
+              </label>
+              <div className="relative">
+                <User className="w-4 h-4 text-[#94A3B8] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Enter registered mobile (e.g. 9845111222)"
+                  value={loginIdentifier}
+                  onChange={(e) => {
+                    setLoginIdentifier(e.target.value);
+                    if (loginError) setLoginError('');
+                  }}
+                  className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-[#0B1B29] focus:outline-hidden focus:border-[#D92F43] transition-colors"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-[#0B1B29] uppercase tracking-wider mb-1.5">
+                4-Digit POS Access PIN
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-[#94A3B8] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="password"
+                  maxLength={4}
+                  placeholder="••••"
+                  value={loginPin}
+                  onChange={(e) => {
+                    setLoginPin(e.target.value.replace(/[^0-9]/g, ''));
+                    if (loginError) setLoginError('');
+                  }}
+                  className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl pl-10 pr-3.5 py-2.5 text-base tracking-[0.5em] font-bold text-[#0B1B29] focus:outline-hidden focus:border-[#D92F43] transition-colors"
+                />
+              </div>
+            </div>
+
+            {loginError && (
+              <div className="flex items-start gap-2 p-3 bg-[#FEE2E2] rounded-xl text-xs text-[#D92F43] font-medium leading-relaxed">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isLoggingIn}
+              className="w-full bg-[#D92F43] hover:bg-[#B82035] disabled:opacity-60 text-white font-bold text-xs py-3 rounded-xl transition-all shadow-md mt-2 flex items-center justify-center gap-2"
+            >
+              {isLoggingIn ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Authorizing...</span>
+                </>
+              ) : (
+                <span>Log In to Floor Manager POS</span>
+              )}
+            </button>
+          </form>
+
+          <div className="mt-6 pt-5 border-t border-[#F1F5F9] text-center text-[11px] text-[#64748B] leading-relaxed">
+            Only manager accounts registered in Staff Management from the mobile app are authorized for this restaurant.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Active print data source (either reprint target or currently active cart)
+  const activeOrderForPrint = reprintTargetOrder || {
+    billNumber: `BILL #${Math.floor(1000 + Math.random() * 9000)}`,
+    kotToken: kotTokenNumber,
+    tableNumber: selectedTable.number,
+    tableSection: selectedTable.section,
+    customerName,
+    customerPhone,
+    serverName: managerSession.name,
+    items: cart,
+    subtotal,
+    discount,
+    cgst,
+    sgst,
+    grandTotal: total,
+    paymentMethod: selectedPaymentMethod,
+    formattedDate: new Date().toLocaleDateString('en-IN'),
+    formattedTime: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+    specialNote,
+  };
+
+  // 2. Manager Order Taking & History Dashboard
+  return (
+    <div className="min-h-screen bg-[#F7F8FA] flex flex-col text-[#0B1B29]">
+      {/* Top Navbar */}
+      <header className="bg-white border-b border-[#E2E8F0] sticky top-0 z-30 shadow-xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          {/* Logo & Outlet info */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-[#D92F43] flex items-center justify-center text-white font-extrabold text-lg shadow-sm">
+                ED
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-extrabold text-xl tracking-tight text-[#0B1B29]">EzyDine</span>
+                  <span className="px-2 py-0.5 text-[11px] font-bold bg-[#DCFCE7] text-[#16A34A] rounded-md">
+                    Manager Portal
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-[#64748B]">
+                  <span className="font-bold text-[#0B1B29]">{managerSession.restaurantName}</span>
+                  <span>•</span>
+                  <span>{managerSession.restaurantLocation}</span>
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#16A34A]" />
+                </div>
+              </div>
+            </div>
+
+            {/* Main Tabs Navigation: POS Floor Billing vs Order History & Reprints */}
+            <div className="hidden md:flex items-center bg-[#F1F5F9] p-1 rounded-xl ml-4">
+              <button
+                onClick={() => setCurrentView('pos')}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  currentView === 'pos'
+                    ? 'bg-white text-[#0B1B29] shadow-xs'
+                    : 'text-[#64748B] hover:text-[#0B1B29]'
+                }`}
+              >
+                <UtensilsCrossed className="w-4 h-4 text-[#D92F43]" />
+                <span>POS Floor & Tables</span>
+                {occupiedTablesList.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-[#D92F43] text-white">
+                    {occupiedTablesList.length} Active
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setCurrentView('history')}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  currentView === 'history'
+                    ? 'bg-white text-[#0B1B29] shadow-xs'
+                    : 'text-[#64748B] hover:text-[#0B1B29]'
+                }`}
+              >
+                <History className="w-4 h-4 text-[#2563EB]" />
+                <span>Order History & Reprints</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-[#EEF2FF] text-[#4338CA] font-bold">
+                  {orderHistory.length}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* Right Action Icons: Printer device, Sync, Profile */}
+          <div className="flex items-center gap-3">
+            {/* Status Toast */}
+            {printStatusMessage && (
+              <div className="hidden lg:flex items-center gap-2 bg-[#DCFCE7] text-[#16A34A] px-3 py-1.5 rounded-lg text-xs font-semibold animate-pulse-slow">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span className="truncate max-w-[280px]">{printStatusMessage}</span>
+              </div>
+            )}
+
+            {/* Hardware Printer Pill */}
+            <button
+              onClick={() => setIsPrinterModalOpen(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-[#BBF7D0] bg-[#F0FDF4] text-[#16A34A] hover:bg-[#DCFCE7] text-xs font-semibold transition-all shadow-xs"
+              title="Search and Connect Real Hardware Printer"
+            >
+              <Printer className="w-4 h-4 text-[#16A34A]" />
+              <span className="font-bold truncate max-w-[170px]">
+                {activePrinter.name} ({activePrinter.paperWidth})
+              </span>
+              <span className="w-2 h-2 rounded-full bg-[#16A34A]" />
+            </button>
+
+            {/* Refresh Menu button */}
+            <button
+              onClick={() => fetchRestaurantMenu(managerSession.token)}
+              disabled={isMenuLoading}
+              title="Sync menu from database"
+              className="p-2 text-[#64748B] hover:text-[#0B1B29] rounded-xl border border-[#E2E8F0] hover:bg-[#F8FAFC] transition-colors"
+            >
+              <RefreshCw className={`w-4 h-4 ${isMenuLoading ? 'animate-spin text-[#D92F43]' : ''}`} />
+            </button>
+
+            {/* Manager Profile & Logout */}
+            <div className="flex items-center gap-2.5 pl-2 border-l border-[#E2E8F0]">
+              <div className="w-8 h-8 rounded-full bg-[#0B1B29] text-white flex items-center justify-center font-bold text-xs">
+                {managerSession.name.slice(0, 2).toUpperCase()}
+              </div>
+              <div className="hidden sm:block text-left text-xs">
+                <div className="font-bold text-[#0B1B29]">{managerSession.name}</div>
+                <div className="text-[#64748B]">{managerSession.role}</div>
+              </div>
+              <button
+                onClick={handleLogout}
+                title="Log Out"
+                className="p-1.5 text-[#64748B] hover:text-[#D92F43] transition-colors rounded-lg hover:bg-[#FEE2E2]"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile View Switcher */}
+        <div className="flex md:hidden border-t border-[#E2E8F0] bg-[#F8FAFC] p-2 gap-2">
+          <button
+            onClick={() => setCurrentView('pos')}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold text-center ${
+              currentView === 'pos' ? 'bg-[#0B1B29] text-white' : 'text-[#64748B]'
+            }`}
+          >
+            Floor Tables ({occupiedTablesList.length} Active)
+          </button>
+          <button
+            onClick={() => setCurrentView('history')}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold text-center ${
+              currentView === 'history' ? 'bg-[#0B1B29] text-white' : 'text-[#64748B]'
+            }`}
+          >
+            Order History & Reprints ({orderHistory.length})
+          </button>
+        </div>
+      </header>
+
+      {/* VIEW 1: POS FLOOR PLAN & BILLING */}
+      {currentView === 'pos' ? (
+        <div className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col lg:flex-row gap-6">
+          {/* Left Column: Tables & Menu Catalog (2/3 width) */}
+          <div className="flex-1 flex flex-col gap-6">
+            {/* Table Selector Strip with Real-Time "Order Placed on Table" Status */}
+            <div className="bg-white rounded-2xl p-4 border border-[#E2E8F0] shadow-xs">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <UtensilsCrossed className="w-4 h-4 text-[#D92F43]" />
+                  <span className="font-bold text-sm text-[#0B1B29]">Floor Plan Tables</span>
+                  <span className="text-xs text-[#64748B]">({floorTables.length} tables)</span>
+                </div>
+
+                {/* Legend & Occupied Summary */}
+                <div className="flex items-center gap-4 text-xs">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-[#16A34A]" /> Available
+                  </span>
+                  <span className="flex items-center gap-1.5 font-bold text-[#D92F43]">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#D92F43] animate-pulse" />
+                    {occupiedTablesList.length} Occupied with Active Orders
+                  </span>
+                </div>
+              </div>
+
+              {/* Table Buttons Grid */}
+              <div className="flex gap-2.5 overflow-x-auto pb-1">
+                {floorTables.map((t) => {
+                  const isSelected = selectedTable.id === t.id;
+                  const isOccupied = t.status === 'occupied' || (t.activeItemsCount && t.activeItemsCount > 0);
+
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => handleSelectTable(t)}
+                      className={`shrink-0 flex flex-col items-center justify-center px-4 py-2.5 rounded-xl border text-xs transition-all relative ${
+                        isSelected
+                          ? 'border-[#0B1B29] bg-[#0B1B29] text-white shadow-md'
+                          : isOccupied
+                          ? 'border-[#FECDD3] bg-[#FFF1F2] text-[#0B1B29] hover:border-[#D92F43]'
+                          : 'border-[#E2E8F0] bg-white text-[#0B1B29] hover:border-[#CBD5E1]'
+                      }`}
+                    >
+                      {/* Active Order Indicator Dot */}
+                      {isOccupied && !isSelected && (
+                        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#D92F43] animate-ping" />
+                      )}
+
+                      <div className="flex items-center gap-1">
+                        <span className="font-extrabold text-sm">{t.number}</span>
+                      </div>
+
+                      <span className={`text-[10px] ${isSelected ? 'text-white/80' : 'text-[#64748B]'}`}>
+                        {t.section}
+                      </span>
+
+                      {/* Display Active Items Count & Amount placed on this table to the manager */}
+                      {isOccupied && (
+                        <div
+                          className={`mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                            isSelected
+                              ? 'bg-white/20 text-white'
+                              : 'bg-[#D92F43] text-white'
+                          }`}
+                        >
+                          {t.activeItemsCount} items • ₹{t.activeTotal}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Menu Catalog Section dynamically loaded from PostgreSQL */}
+            <div className="bg-white rounded-2xl p-5 border border-[#E2E8F0] shadow-xs flex-1 flex flex-col">
+              {/* Search and Category Tabs */}
+              <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between mb-5">
+                {/* Category Pills */}
+                <div className="flex gap-1.5 overflow-x-auto pb-1">
+                  {categories.map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => setSelectedCategory(cat)}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all capitalize whitespace-nowrap ${
+                        selectedCategory === cat
+                          ? 'bg-[#D92F43] text-white shadow-xs'
+                          : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#0B1B29] hover:bg-[#E2E8F0]'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search Bar */}
+                <div className="relative min-w-[200px]">
+                  <Search className="w-4 h-4 text-[#94A3B8] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Search dish, code (e.g. Paneer Tikka, #12)..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl pl-9 pr-3 py-1.5 text-xs text-[#0B1B29] placeholder-[#94A3B8] focus:outline-hidden focus:border-[#D92F43]"
+                  />
+                </div>
+              </div>
+
+              {/* Quick Add helper when searching */}
+              {searchQuery.trim() && (
+                <div className="mb-4 flex items-center justify-between bg-[#FFF1F2] border border-[#FECDD3] px-3.5 py-2 rounded-xl text-xs">
+                  <span className="text-[#0B1B29] font-medium">Adding custom dish?</span>
+                  <button
+                    onClick={() => handleQuickAddDish(searchQuery)}
+                    className="flex items-center gap-1 text-[#D92F43] font-bold hover:underline"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Quick Add "{searchQuery.trim()}" to Menu & Bill</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Menu Items Grid */}
+              {isMenuLoading ? (
+                <div className="flex-1 flex flex-col items-center justify-center p-12 text-[#94A3B8]">
+                  <RefreshCw className="w-8 h-8 animate-spin text-[#D92F43] mb-3" />
+                  <p className="text-xs font-semibold">Loading menu items from PostgreSQL database...</p>
+                </div>
+              ) : filteredItems.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center p-12 text-[#94A3B8]">
+                  <UtensilsCrossed className="w-8 h-8 mb-2 stroke-1" />
+                  <p className="text-xs font-semibold">
+                    {searchQuery ? `No dishes match "${searchQuery}"` : 'No menu items found for this restaurant.'}
+                  </p>
+                  {searchQuery ? (
+                    <button
+                      onClick={() => handleQuickAddDish(searchQuery)}
+                      className="mt-3 flex items-center gap-1.5 bg-[#D92F43] text-white px-3.5 py-2 rounded-xl text-xs font-bold hover:bg-[#B82035] transition-all shadow-sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Create "{searchQuery.trim()}" & Add to Order</span>
+                    </button>
+                  ) : (
+                    <p className="text-[11px] mt-1">Add dishes in the mobile app Menu Management to display them here.</p>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5 flex-1 overflow-y-auto max-h-[560px] pr-1">
+                  {filteredItems.map((dish) => {
+                    const inCart = cart.find((c) => c.id === dish.id);
+                    return (
+                      <div
+                        key={dish.id}
+                        className="border border-[#E2E8F0] rounded-xl p-3.5 flex flex-col justify-between hover:border-[#CBD5E1] transition-all bg-white hover:shadow-xs group"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`w-3 h-3 rounded-full border flex items-center justify-center ${
+                                  dish.isVeg ? 'border-[#16A34A]' : 'border-[#D92F43]'
+                                }`}
+                              >
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full ${
+                                    dish.isVeg ? 'bg-[#16A34A]' : 'bg-[#D92F43]'
+                                  }`}
+                                />
+                              </span>
+                              <span className="font-bold text-xs text-[#0B1B29] group-hover:text-[#D92F43] transition-colors">
+                                {dish.name}
+                              </span>
+                            </div>
+                            <span className="font-extrabold text-sm text-[#0B1B29]">₹{dish.price}</span>
+                          </div>
+                          <p className="text-[11px] text-[#64748B] line-clamp-2 mb-3">{dish.description}</p>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-[#F1F5F9]">
+                          <span className="text-[10px] uppercase font-bold text-[#94A3B8] tracking-wider">
+                            {dish.category}
+                          </span>
+
+                          {inCart ? (
+                            <div className="flex items-center gap-2 bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg px-2 py-1">
+                              <button
+                                onClick={() => updateQuantity(dish.id, -1)}
+                                className="text-[#64748B] hover:text-[#D92F43] transition-colors"
+                              >
+                                <Minus className="w-3.5 h-3.5" />
+                              </button>
+                              <span className="font-bold text-xs text-[#0B1B29] w-4 text-center">
+                                {inCart.quantity}
+                              </span>
+                              <button
+                                onClick={() => updateQuantity(dish.id, 1)}
+                                className="text-[#64748B] hover:text-[#16A34A] transition-colors"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => addToCart(dish)}
+                              className="flex items-center gap-1 bg-[#0B1B29] hover:bg-[#D92F43] text-white px-2.5 py-1 rounded-lg text-xs font-bold transition-all shadow-xs"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>Add</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column: Active Cart / Table Order Billing Panel (1/3 width) */}
+          <div className="w-full lg:w-[400px] bg-white rounded-2xl border border-[#E2E8F0] shadow-xs flex flex-col">
+            {/* Cart Header */}
+            <div className="p-4 border-b border-[#E2E8F0] flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-[#FEE2E2] text-[#D92F43] flex items-center justify-center font-bold">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-sm text-[#0B1B29]">Table {selectedTable.number}</span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-[#F1F5F9] text-[#64748B]">
+                      {selectedTable.section}
+                    </span>
+                    {cart.length > 0 && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-[#FEE2E2] text-[#D92F43]">
+                        Order Placed
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-[#64748B]">Capacity: {selectedTable.capacity} Seats</div>
+                </div>
+              </div>
+
+              <button
+                onClick={clearCart}
+                title="Clear Cart"
+                disabled={cart.length === 0}
+                className="p-1.5 text-[#94A3B8] hover:text-[#D92F43] disabled:opacity-40 transition-colors rounded-lg hover:bg-[#FEE2E2]"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Customer Info (Optional) */}
+            <div className="p-3 bg-[#F8FAFC] border-b border-[#E2E8F0] grid grid-cols-2 gap-2">
+              <div className="relative">
+                <User className="w-3 h-3 text-[#94A3B8] absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Guest Name"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  className="w-full bg-white border border-[#E2E8F0] rounded-lg pl-7 pr-2 py-1 text-xs text-[#0B1B29] focus:outline-hidden"
+                />
+              </div>
+              <div className="relative">
+                <Phone className="w-3 h-3 text-[#94A3B8] absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Phone (optional)"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  className="w-full bg-white border border-[#E2E8F0] rounded-lg pl-7 pr-2 py-1 text-xs text-[#0B1B29] focus:outline-hidden"
+                />
+              </div>
+            </div>
+
+            {/* Cart Items List */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[220px] max-h-[300px]">
+              {cart.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center p-6 text-[#94A3B8]">
+                  <UtensilsCrossed className="w-8 h-8 mb-2 stroke-1" />
+                  <p className="text-xs font-semibold">No items placed for this table yet.</p>
+                  <p className="text-[11px]">Click "+ Add" on any menu dish to start the order.</p>
+                </div>
+              ) : (
+                cart.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between gap-3 text-xs">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-[#0B1B29] truncate">{item.name}</div>
+                      <div className="text-[#64748B] text-[11px]">₹{item.price} each</div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 bg-[#F1F5F9] rounded-lg px-2 py-1">
+                      <button
+                        onClick={() => updateQuantity(item.id, -1)}
+                        className="text-[#64748B] hover:text-[#D92F43]"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <span className="font-bold text-[#0B1B29] w-4 text-center">{item.quantity}</span>
+                      <button
+                        onClick={() => updateQuantity(item.id, 1)}
+                        className="text-[#64748B] hover:text-[#16A34A]"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+
+                    <div className="font-bold text-[#0B1B29] w-14 text-right">
+                      ₹{item.price * item.quantity}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Special Instructions Note */}
+            <div className="px-4 pb-2">
+              <input
+                type="text"
+                placeholder="Cooking note for Kitchen Chef (e.g. less spicy, crisp)..."
+                value={specialNote}
+                onChange={(e) => setSpecialNote(e.target.value)}
+                className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg px-3 py-1.5 text-xs text-[#0B1B29] focus:outline-hidden"
+              />
+            </div>
+
+            {/* Payment Method Selector (Cash, UPI, or Card Option) */}
+            <div className="p-3 border-t border-[#E2E8F0] bg-white">
+              <label className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block mb-1.5">
+                Payment Option (Cash / UPI / Card)
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedPaymentMethod('Cash')}
+                  className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all border ${
+                    selectedPaymentMethod === 'Cash'
+                      ? 'border-[#16A34A] bg-[#F0FDF4] text-[#16A34A] shadow-xs'
+                      : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
+                  }`}
+                >
+                  <Banknote className="w-3.5 h-3.5" />
+                  <span>Cash</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedPaymentMethod('UPI')}
+                  className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all border ${
+                    selectedPaymentMethod === 'UPI'
+                      ? 'border-[#2563EB] bg-[#EFF6FF] text-[#2563EB] shadow-xs'
+                      : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
+                  }`}
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>UPI / QR</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedPaymentMethod('Card')}
+                  className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all border ${
+                    selectedPaymentMethod === 'Card'
+                      ? 'border-[#7C3AED] bg-[#F5F3FF] text-[#7C3AED] shadow-xs'
+                      : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
+                  }`}
+                >
+                  <CreditCard className="w-3.5 h-3.5" />
+                  <span>Card</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Totals & Breakdown */}
+            <div className="p-4 border-t border-[#E2E8F0] bg-[#F8FAFC] space-y-1.5 text-xs">
+              <div className="flex justify-between text-[#64748B]">
+                <span>Subtotal</span>
+                <span>₹{subtotal.toFixed(2)}</span>
+              </div>
+
+              {discount > 0 && (
+                <div className="flex justify-between text-[#D92F43] font-medium">
+                  <span>Promo Discount</span>
+                  <span>- ₹{discount.toFixed(2)}</span>
+                </div>
+              )}
+
+              <div className="flex justify-between text-[#64748B]">
+                <span>CGST (2.5% HSN 9963)</span>
+                <span>₹{cgst.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-[#64748B]">
+                <span>SGST (2.5% HSN 9963)</span>
+                <span>₹{sgst.toFixed(2)}</span>
+              </div>
+
+              <div className="pt-2 border-t border-[#E2E8F0] flex justify-between items-center text-sm font-extrabold text-[#0B1B29]">
+                <span>Grand Total</span>
+                <span className="text-lg text-[#D92F43]">₹{total.toFixed(2)}</span>
+              </div>
+            </div>
+
+            {/* 1-Click Action Buttons: Direct KOT Print vs Direct Bill Print */}
+            <div className="p-4 border-t border-[#E2E8F0] grid grid-cols-2 gap-2">
+              <button
+                onClick={handlePrintKOT}
+                disabled={cart.length === 0}
+                className="flex items-center justify-center gap-1.5 bg-[#0B1B29] hover:bg-[#1E293B] disabled:opacity-50 text-white py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs"
+                title="Place Order on Table & Print Kitchen Order Ticket (Token only, No prices)"
+              >
+                <ChefHat className="w-4 h-4" />
+                <span>Print KOT</span>
+              </button>
+
+              <button
+                onClick={handleBillAndPrint}
+                disabled={cart.length === 0}
+                className="flex items-center justify-center gap-1.5 bg-[#D92F43] hover:bg-[#B82035] disabled:opacity-50 text-white py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs"
+                title="Print Customer Tax Invoice Receipt & Move to Order History"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Bill & Print</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* VIEW 2: ORDER HISTORY & REPRINT OPTIONS (Shown to Manager Once Print is Done) */
+        <div className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-6">
+          {/* Top Banner & Quick Return to Floor */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-[#E2E8F0] shadow-xs">
+            <div>
+              <div className="flex items-center gap-2">
+                <History className="w-5 h-5 text-[#2563EB]" />
+                <h2 className="text-lg font-extrabold text-[#0B1B29]">Manager Order History & Reprints</h2>
+                <span className="px-2 py-0.5 text-xs font-bold bg-[#EEF2FF] text-[#2563EB] rounded-md">
+                  {orderHistory.length} Total Orders
+                </span>
+              </div>
+              <p className="text-xs text-[#64748B] mt-1">
+                Print completed bills, reprint KOTs, or update payment mode (Cash, UPI, Card).
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={() => setCurrentView('pos')}
+                className="flex items-center gap-2 bg-[#D92F43] hover:bg-[#B82035] text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Take New Order / Floor Plan</span>
+              </button>
+            </div>
+          </div>
+
+          {/* KPI Metrics Strip (Total Sales, Cash, UPI, Card breakdown) */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white rounded-2xl p-4 border border-[#E2E8F0] shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-[#64748B] uppercase">Total Billed</span>
+                <div className="text-xl font-extrabold text-[#0B1B29] mt-0.5">₹{totalRevenue.toFixed(2)}</div>
+                <div className="text-[11px] text-[#16A34A] mt-0.5 font-medium">{orderHistory.length} Orders</div>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-[#F1F5F9] text-[#0B1B29] flex items-center justify-center font-bold">
+                <Receipt className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl p-4 border border-[#E2E8F0] shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-[#16A34A] uppercase">Cash Collected</span>
+                <div className="text-xl font-extrabold text-[#16A34A] mt-0.5">₹{totalCash.toFixed(2)}</div>
+                <div className="text-[11px] text-[#64748B] mt-0.5">
+                  {orderHistory.filter((o) => o.paymentMethod === 'Cash').length} Cash Bills
+                </div>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-[#DCFCE7] text-[#16A34A] flex items-center justify-center font-bold">
+                <Banknote className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl p-4 border border-[#E2E8F0] shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-[#2563EB] uppercase">UPI / QR Payment</span>
+                <div className="text-xl font-extrabold text-[#2563EB] mt-0.5">₹{totalUPI.toFixed(2)}</div>
+                <div className="text-[11px] text-[#64748B] mt-0.5">
+                  {orderHistory.filter((o) => o.paymentMethod === 'UPI').length} UPI Bills
+                </div>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center font-bold">
+                <QrCode className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl p-4 border border-[#E2E8F0] shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-[#7C3AED] uppercase">Card Swipes</span>
+                <div className="text-xl font-extrabold text-[#7C3AED] mt-0.5">₹{totalCard.toFixed(2)}</div>
+                <div className="text-[11px] text-[#64748B] mt-0.5">
+                  {orderHistory.filter((o) => o.paymentMethod === 'Card').length} Card Bills
+                </div>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-[#F5F3FF] text-[#7C3AED] flex items-center justify-center font-bold">
+                <CreditCard className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Bar & Search */}
+          <div className="bg-white rounded-2xl p-4 border border-[#E2E8F0] shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            {/* Payment Method Filter Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+              <button
+                onClick={() => setHistoryFilterPayment('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  historyFilterPayment === 'all'
+                    ? 'bg-[#0B1B29] text-white shadow-xs'
+                    : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#0B1B29]'
+                }`}
+              >
+                All Orders ({orderHistory.length})
+              </button>
+
+              <button
+                onClick={() => setHistoryFilterPayment('Cash')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  historyFilterPayment === 'Cash'
+                    ? 'bg-[#16A34A] text-white shadow-xs'
+                    : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#16A34A]'
+                }`}
+              >
+                <Banknote className="w-3.5 h-3.5" />
+                <span>Cash Only</span>
+              </button>
+
+              <button
+                onClick={() => setHistoryFilterPayment('UPI')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  historyFilterPayment === 'UPI'
+                    ? 'bg-[#2563EB] text-white shadow-xs'
+                    : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#2563EB]'
+                }`}
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                <span>UPI Only</span>
+              </button>
+
+              <button
+                onClick={() => setHistoryFilterPayment('Card')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  historyFilterPayment === 'Card'
+                    ? 'bg-[#7C3AED] text-white shadow-xs'
+                    : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#7C3AED]'
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>Card Only</span>
+              </button>
+            </div>
+
+            {/* History Search Bar */}
+            <div className="relative min-w-[240px]">
+              <Search className="w-4 h-4 text-[#94A3B8] absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search Bill #, Table, Guest or Dish..."
+                value={historySearchQuery}
+                onChange={(e) => setHistorySearchQuery(e.target.value)}
+                className="w-full bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl pl-9 pr-3 py-1.5 text-xs text-[#0B1B29] placeholder-[#94A3B8] focus:outline-hidden focus:border-[#D92F43]"
+              />
+            </div>
+          </div>
+
+          {/* Orders History List */}
+          {filteredOrderHistory.length === 0 ? (
+            <div className="bg-white rounded-2xl p-16 text-center border border-[#E2E8F0] shadow-xs flex flex-col items-center justify-center">
+              <History className="w-12 h-12 text-[#94A3B8] mb-3 stroke-1" />
+              <h3 className="text-base font-bold text-[#0B1B29]">No Orders in History</h3>
+              <p className="text-xs text-[#64748B] max-w-sm mt-1">
+                {historySearchQuery
+                  ? `No orders matching "${historySearchQuery}".`
+                  : 'Complete an order in POS Billing to see print history and reprint slips.'}
+              </p>
+              <button
+                onClick={() => setCurrentView('pos')}
+                className="mt-4 bg-[#D92F43] hover:bg-[#B82035] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-xs"
+              >
+                Go to POS Floor Tables
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {filteredOrderHistory.map((order) => {
+                const isCash = order.paymentMethod === 'Cash';
+                const isUPI = order.paymentMethod === 'UPI';
+                const isCard = order.paymentMethod === 'Card';
+
+                return (
+                  <div
+                    key={order.id}
+                    className="bg-white rounded-2xl border border-[#E2E8F0] p-5 shadow-xs hover:border-[#CBD5E1] transition-all flex flex-col lg:flex-row lg:items-center justify-between gap-5"
+                  >
+                    {/* Left: Bill Details & Table Info */}
+                    <div className="flex-1">
+                      <div className="flex flex-wrap items-center gap-2.5 mb-2">
+                        <span className="font-extrabold text-base text-[#0B1B29]">{order.billNumber}</span>
+                        <span className="px-2 py-0.5 rounded-md bg-[#0B1B29] text-white text-xs font-bold">
+                          Table {order.tableNumber}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md bg-[#F1F5F9] text-[#64748B] text-xs font-bold">
+                          {order.tableSection}
+                        </span>
+                        <span className="text-xs font-semibold text-[#16A34A] bg-[#DCFCE7] px-2 py-0.5 rounded-md">
+                          KOT #{order.kotToken}
+                        </span>
+                      </div>
+
+                      {/* Timestamps & Cashier */}
+                      <div className="flex flex-wrap items-center gap-4 text-xs text-[#64748B] mb-3">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5 text-[#94A3B8]" />
+                          <span>{order.formattedDate}</span>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-[#94A3B8]" />
+                          <span>{order.formattedTime}</span>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <User className="w-3.5 h-3.5 text-[#94A3B8]" />
+                          <span>Cashier: {order.serverName}</span>
+                        </span>
+                        {order.customerName && (
+                          <span className="font-bold text-[#0B1B29]">Guest: {order.customerName}</span>
+                        )}
+                      </div>
+
+                      {/* Itemized summary chips */}
+                      <div className="flex flex-wrap gap-1.5">
+                        {order.items.map((i, idx) => (
+                          <span
+                            key={idx}
+                            className="text-xs bg-[#F8FAFC] border border-[#E2E8F0] text-[#0B1B29] px-2.5 py-1 rounded-lg font-medium"
+                          >
+                            <span className="font-bold text-[#D92F43]">[{i.quantity}]</span> {i.name}
+                          </span>
+                        ))}
+                      </div>
+
+                      {order.specialNote && (
+                        <div className="text-[11px] text-[#64748B] italic mt-2">
+                          Note: "{order.specialNote}"
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Middle: Amount & Payment Mode Selector (Cash / UPI / Card Options) */}
+                    <div className="lg:border-l lg:border-r border-[#E2E8F0] lg:px-6 py-2 flex flex-col justify-center items-start lg:items-center min-w-[220px]">
+                      <div className="text-[11px] font-bold text-[#64748B] uppercase">Amount & Payment Mode</div>
+                      <div className="text-2xl font-extrabold text-[#D92F43] my-1">
+                        ₹{order.grandTotal.toFixed(2)}
+                      </div>
+
+                      {/* Amount Payment Method Options: Manager can click to change mode directly in history */}
+                      <div className="flex items-center gap-1.5 mt-1 bg-[#F8FAFC] p-1 rounded-xl border border-[#E2E8F0]">
+                        <button
+                          onClick={() => handleUpdateOrderPaymentMethod(order.id, 'Cash')}
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                            isCash
+                              ? 'bg-[#16A34A] text-white shadow-xs'
+                              : 'text-[#64748B] hover:text-[#0B1B29]'
+                          }`}
+                          title="Set payment mode as Cash"
+                        >
+                          <Banknote className="w-3.5 h-3.5" />
+                          <span>Cash</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleUpdateOrderPaymentMethod(order.id, 'UPI')}
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                            isUPI
+                              ? 'bg-[#2563EB] text-white shadow-xs'
+                              : 'text-[#64748B] hover:text-[#0B1B29]'
+                          }`}
+                          title="Set payment mode as UPI"
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                          <span>UPI</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleUpdateOrderPaymentMethod(order.id, 'Card')}
+                          className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                            isCard
+                              ? 'bg-[#7C3AED] text-white shadow-xs'
+                              : 'text-[#64748B] hover:text-[#0B1B29]'
+                          }`}
+                          title="Set payment mode as Card"
+                        >
+                          <CreditCard className="w-3.5 h-3.5" />
+                          <span>Card</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Right: Reprint Action Buttons */}
+                    <div className="flex flex-col sm:flex-row lg:flex-col gap-2 shrink-0">
+                      <button
+                        onClick={() => handleReprintBill(order)}
+                        className="flex items-center justify-center gap-2 bg-[#D92F43] hover:bg-[#B82035] text-white px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs"
+                        title="Reprint Full Customer Tax Invoice Bill"
+                      >
+                        <Printer className="w-4 h-4" />
+                        <span>Reprint Bill</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleReprintKOT(order)}
+                        className="flex items-center justify-center gap-2 bg-[#0B1B29] hover:bg-[#1E293B] text-white px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs"
+                        title="Reprint Kitchen Order Ticket (Token only, No prices)"
+                      >
+                        <ChefHat className="w-4 h-4" />
+                        <span>Reprint KOT</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Real Hardware Printer Device Connect Modal */}
+      {isPrinterModalOpen && (
+        <div className="fixed inset-0 z-50 bg-[#0B1B29]/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-[#E2E8F0]">
+            <div className="flex items-center justify-between pb-4 border-b border-[#F1F5F9]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#0B1B29] text-white flex items-center justify-center">
+                  <HardDrive className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-[#0B1B29]">Real Hardware Printer Setup</h3>
+                  <p className="text-xs text-[#64748B]">
+                    Active: <span className="font-bold text-[#16A34A]">{activePrinter.name}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsPrinterModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-[#F1F5F9] text-[#64748B] hover:text-[#0B1B29] flex items-center justify-center transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Paper Width Selector */}
+            <div className="mt-4">
+              <label className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider block mb-1.5">
+                Thermal Roll Width
+              </label>
+              <div className="grid grid-cols-2 gap-2 bg-[#F1F5F9] p-1 rounded-xl">
+                <button
+                  onClick={() => handleUpdatePaperWidth('58mm')}
+                  className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                    activePrinter.paperWidth === '58mm'
+                      ? 'bg-[#0B1B29] text-white shadow-xs'
+                      : 'text-[#64748B] hover:text-[#0B1B29]'
+                  }`}
+                >
+                  58mm (2-inch Pocket Roll)
+                </button>
+                <button
+                  onClick={() => handleUpdatePaperWidth('80mm')}
+                  className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                    activePrinter.paperWidth === '80mm'
+                      ? 'bg-[#0B1B29] text-white shadow-xs'
+                      : 'text-[#64748B] hover:text-[#0B1B29]'
+                  }`}
+                >
+                  80mm (3-inch Counter Roll)
+                </button>
+              </div>
+            </div>
+
+            {/* Hardware Connect Actions */}
+            <div className="mt-5">
+              <div className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider mb-2">
+                Discover Connected Hardware
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={handleScanUsbPrinter}
+                  disabled={isScanningPrinter}
+                  className="flex flex-col items-center justify-center p-3 rounded-xl border border-[#E2E8F0] hover:border-[#D92F43] hover:bg-[#FFF1F2] transition-all text-center gap-1.5 group"
+                >
+                  <Usb className="w-5 h-5 text-[#0B1B29] group-hover:text-[#D92F43]" />
+                  <span className="text-xs font-bold text-[#0B1B29]">USB Thermal</span>
+                  <span className="text-[10px] text-[#64748B]">Scan WebUSB</span>
+                </button>
+
+                <button
+                  onClick={handleScanBluetoothPrinter}
+                  disabled={isScanningPrinter}
+                  className="flex flex-col items-center justify-center p-3 rounded-xl border border-[#E2E8F0] hover:border-[#2563EB] hover:bg-[#EFF6FF] transition-all text-center gap-1.5 group"
+                >
+                  <Bluetooth className="w-5 h-5 text-[#0B1B29] group-hover:text-[#2563EB]" />
+                  <span className="text-xs font-bold text-[#0B1B29]">Bluetooth POS</span>
+                  <span className="text-[10px] text-[#64748B]">Scan Wireless</span>
+                </button>
+
+                <button
+                  onClick={handleScanSerialPrinter}
+                  disabled={isScanningPrinter}
+                  className="flex flex-col items-center justify-center p-3 rounded-xl border border-[#E2E8F0] hover:border-[#7C3AED] hover:bg-[#F5F3FF] transition-all text-center gap-1.5 group"
+                >
+                  <Cpu className="w-5 h-5 text-[#0B1B29] group-hover:text-[#7C3AED]" />
+                  <span className="text-xs font-bold text-[#0B1B29]">Serial / COM</span>
+                  <span className="text-[10px] text-[#64748B]">RS-232 / USB</span>
+                </button>
+              </div>
+
+              {scanMessage && (
+                <div className="mt-3 p-2.5 bg-[#DCFCE7] text-[#16A34A] rounded-xl text-xs font-semibold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>{scanMessage}</span>
+                </div>
+              )}
+              {scanError && (
+                <div className="mt-3 p-2.5 bg-[#FEE2E2] text-[#D92F43] rounded-xl text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{scanError}</span>
+                </div>
+              )}
+
+              <div className="mt-4 pt-3 border-t border-[#F1F5F9]">
+                <label className="text-[11px] font-bold text-[#64748B] block mb-1">
+                  Or Add System Driver / Network Printer Name:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="e.g. Epson TM-T82, TVS RP-3160, LAN Printer..."
+                    value={customPrinterName}
+                    onChange={(e) => setCustomPrinterName(e.target.value)}
+                    className="flex-1 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl px-3 py-2 text-xs text-[#0B1B29] focus:outline-hidden"
+                  />
+                  <button
+                    onClick={handleAddSystemPrinter}
+                    className="bg-[#0B1B29] text-white px-3 py-2 rounded-xl text-xs font-bold hover:bg-[#1E293B] shrink-0"
+                  >
+                    Add Device
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Connected Real Devices List */}
+            <div className="mt-5">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-[#0B1B29]">Connected Printers</span>
+                <span className="text-[11px] text-[#64748B]">Auto-saved</span>
+              </div>
+
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {pairedPrinters.length === 0 ? (
+                  <div className="p-4 border border-dashed border-[#CBD5E1] rounded-xl text-center text-xs text-[#94A3B8]">
+                    No hardware printers paired yet. Scan for USB/Bluetooth above or add your system printer.
+                  </div>
+                ) : (
+                  pairedPrinters.map((printer) => {
+                    const isSelected = activePrinter.id === printer.id;
+                    return (
+                      <div
+                        key={printer.id}
+                        onClick={() => saveAndActivatePrinter(printer)}
+                        className={`cursor-pointer border rounded-xl p-3 flex items-center justify-between transition-all ${
+                          isSelected
+                            ? 'border-[#16A34A] bg-[#F0FDF4]'
+                            : 'border-[#E2E8F0] hover:border-[#CBD5E1] bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className={`w-9 h-9 rounded-lg flex items-center justify-center ${
+                              isSelected ? 'bg-[#DCFCE7] text-[#16A34A]' : 'bg-[#F1F5F9] text-[#0B1B29]'
+                            }`}
+                          >
+                            <Printer className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-xs text-[#0B1B29]">{printer.name}</span>
+                              <span className="text-[10px] bg-[#EEF2FF] text-[#4338CA] px-1.5 py-0.5 rounded-sm font-bold uppercase">
+                                {printer.connectionType}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-[#64748B]">
+                              Width: {printer.paperWidth} • Status: Ready
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {isSelected ? (
+                            <span className="flex items-center gap-1 text-xs font-bold text-[#16A34A]">
+                              <Check className="w-4 h-4" />
+                              <span>Active</span>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => saveAndActivatePrinter(printer)}
+                              className="text-xs font-bold text-[#0B1B29] bg-[#F1F5F9] hover:bg-[#E2E8F0] px-2.5 py-1 rounded-lg"
+                            >
+                              Select
+                            </button>
+                          )}
+                          <button
+                            onClick={(e) => handleRemovePrinter(printer.id, e)}
+                            className="p-1 text-[#94A3B8] hover:text-[#D92F43]"
+                            title="Remove Device"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-[#F1F5F9] grid grid-cols-2 gap-2">
+              <button
+                onClick={() => {
+                  window.print();
+                }}
+                className="border border-[#E2E8F0] hover:bg-[#F8FAFC] text-[#0B1B29] py-2.5 rounded-xl font-bold text-xs transition-colors"
+              >
+                Test Printer Slip
+              </button>
+              <button
+                onClick={() => setIsPrinterModalOpen(false)}
+                className="bg-[#D92F43] hover:bg-[#B82035] text-white py-2.5 rounded-xl font-bold text-xs transition-colors shadow-xs"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GENERATE PRINT MODAL (Owner Saved Template Preview - Replaces Automatic System Print Dialog) */}
+      {isGeneratePrintOpen && generatedPrintData && (
+        <div className="fixed inset-0 z-50 bg-[#0B1B29]/75 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-[#E2E8F0] my-8 flex flex-col gap-4 max-h-[92vh]">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-[#F1F5F9]">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#D92F43] text-white flex items-center justify-center shadow-xs">
+                  {generatedPrintData.mode === 'kot' ? <ChefHat className="w-5 h-5" /> : <Printer className="w-5 h-5" />}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-extrabold text-base text-[#0B1B29]">Generate Print</h3>
+                    <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-md bg-[#DCFCE7] text-[#16A34A]">
+                      Owner Saved Template
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#64748B]">
+                    {generatedPrintData.mode === 'kot'
+                      ? `KOT Kitchen Slip • Token #${generatedPrintData.order.kotToken} (Zero Prices)`
+                      : `Customer Tax Invoice • ${generatedPrintData.order.billNumber}`}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsTemplateEditorOpen((prev) => !prev)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
+                    isTemplateEditorOpen
+                      ? 'border-[#D92F43] bg-[#FFF1F2] text-[#D92F43]'
+                      : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
+                  }`}
+                  title="Customize Owner Saved Template"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Template Settings</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsGeneratePrintOpen(false);
+                    setIsTemplateEditorOpen(false);
+                  }}
+                  className="w-8 h-8 rounded-full bg-[#F1F5F9] text-[#64748B] hover:text-[#0B1B29] flex items-center justify-center transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Collapsible Owner Template Customizer Settings */}
+            {isTemplateEditorOpen && (
+              <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl p-4 text-xs space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-[#E2E8F0]">
+                  <span className="font-bold text-[#0B1B29] flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-[#D92F43]" />
+                    <span>Owner Receipt Template Settings</span>
+                  </span>
+                  <span className="text-[10px] text-[#64748B]">Auto-saved to restaurant profile</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-[#64748B] uppercase block mb-1">
+                      Header Tagline / Slogan
+                    </label>
+                    <input
+                      type="text"
+                      value={ownerTemplate.headerText}
+                      onChange={(e) => setOwnerTemplate((prev) => ({ ...prev, headerText: e.target.value }))}
+                      className="w-full bg-white border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-xs text-[#0B1B29] focus:outline-hidden"
+                      placeholder="e.g. Authentic Flavors · Fresh Ingredients"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-[#64748B] uppercase block mb-1">
+                      Footer Closing Note
+                    </label>
+                    <input
+                      type="text"
+                      value={ownerTemplate.footerText}
+                      onChange={(e) => setOwnerTemplate((prev) => ({ ...prev, footerText: e.target.value }))}
+                      className="w-full bg-white border border-[#E2E8F0] rounded-lg px-2.5 py-1.5 text-xs text-[#0B1B29] focus:outline-hidden"
+                      placeholder="e.g. Thank you for dining with us! Visit again."
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded-xl border border-[#E2E8F0]">
+                    <input
+                      type="checkbox"
+                      checked={ownerTemplate.showLogo}
+                      onChange={(e) => setOwnerTemplate((prev) => ({ ...prev, showLogo: e.target.checked }))}
+                      className="rounded text-[#D92F43]"
+                    />
+                    <span className="text-[11px] font-medium text-[#0B1B29]">Show Logo</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded-xl border border-[#E2E8F0]">
+                    <input
+                      type="checkbox"
+                      checked={ownerTemplate.showGst}
+                      onChange={(e) => setOwnerTemplate((prev) => ({ ...prev, showGst: e.target.checked }))}
+                      className="rounded text-[#D92F43]"
+                    />
+                    <span className="text-[11px] font-medium text-[#0B1B29]">Show GSTIN</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded-xl border border-[#E2E8F0]">
+                    <input
+                      type="checkbox"
+                      checked={ownerTemplate.showFssai}
+                      onChange={(e) => setOwnerTemplate((prev) => ({ ...prev, showFssai: e.target.checked }))}
+                      className="rounded text-[#D92F43]"
+                    />
+                    <span className="text-[11px] font-medium text-[#0B1B29]">Show FSSAI</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded-xl border border-[#E2E8F0]">
+                    <input
+                      type="checkbox"
+                      checked={ownerTemplate.showCashier}
+                      onChange={(e) => setOwnerTemplate((prev) => ({ ...prev, showCashier: e.target.checked }))}
+                      className="rounded text-[#D92F43]"
+                    />
+                    <span className="text-[11px] font-medium text-[#0B1B29]">Show Cashier</span>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-[#E2E8F0]">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold text-[#64748B] uppercase">Thermal Roll:</span>
+                    <button
+                      type="button"
+                      onClick={() => setOwnerTemplate((prev) => ({ ...prev, paperWidth: '58mm' }))}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                        ownerTemplate.paperWidth === '58mm' ? 'bg-[#0B1B29] text-white' : 'bg-white text-[#64748B] border border-[#E2E8F0]'
+                      }`}
+                    >
+                      58mm (Pocket)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOwnerTemplate((prev) => ({ ...prev, paperWidth: '80mm' }))}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                        ownerTemplate.paperWidth === '80mm' ? 'bg-[#0B1B29] text-white' : 'bg-white text-[#64748B] border border-[#E2E8F0]'
+                      }`}
+                    >
+                      80mm (Counter)
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSaveOwnerTemplate(ownerTemplate)}
+                    className="bg-[#16A34A] hover:bg-[#15803D] text-white px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs"
+                  >
+                    Save & Apply Template
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Generated Receipt Slip Preview (Visual Thermal Roll in Owner Template) */}
+            <div className="flex-1 overflow-y-auto flex justify-center py-2 bg-[#F1F5F9] rounded-2xl border border-[#E2E8F0] p-4 max-h-[500px]">
+              <div
+                className={`bg-white text-black font-mono shadow-md border-t-4 border-b-4 border-dashed border-[#CBD5E1] p-5 transition-all text-xs leading-relaxed ${
+                  ownerTemplate.paperWidth === '58mm' ? 'w-[300px]' : 'w-[380px]'
+                }`}
+              >
+                {generatedPrintData.mode === 'kot' ? (
+                  /* KOT Kitchen Order Ticket Template */
+                  <div>
+                    <div className="text-center mb-2">
+                      <div className="font-extrabold text-base tracking-tight">*** KITCHEN ORDER TICKET ***</div>
+                      <div className="text-xl font-black my-1 bg-[#0B1B29] text-white py-0.5 rounded-sm">
+                        TOKEN #{generatedPrintData.order.kotToken}
+                      </div>
+                      <div className="text-xs font-bold">{managerSession.restaurantName}</div>
+                    </div>
+
+                    <div className="border-t-2 border-dashed border-black my-2" />
+
+                    <div className="flex justify-between font-bold text-xs">
+                      <span>TABLE: {generatedPrintData.order.tableNumber} ({generatedPrintData.order.tableSection})</span>
+                      <span>TIME: {generatedPrintData.order.formattedTime}</span>
+                    </div>
+
+                    {ownerTemplate.showCashier && (
+                      <div className="text-[11px] text-[#475569]">
+                        Server: {generatedPrintData.order.serverName} • {generatedPrintData.order.formattedDate}
+                      </div>
+                    )}
+
+                    {generatedPrintData.order.customerName && (
+                      <div className="text-[11px]">Guest: {generatedPrintData.order.customerName}</div>
+                    )}
+
+                    <div className="border-t-2 border-dashed border-black my-2" />
+
+                    <div className="flex justify-between font-bold text-xs uppercase mb-1">
+                      <span>QTY  ITEM</span>
+                      <span>STATUS</span>
+                    </div>
+
+                    <div className="border-t border-black mb-2" />
+
+                    <div className="space-y-1.5">
+                      {generatedPrintData.order.items.map((c: any, idx: number) => (
+                        <div key={idx} className="flex justify-between items-baseline font-bold text-sm">
+                          <span>[{c.quantity}] {c.name}</span>
+                          <span className="text-[10px] px-1 py-0.2 rounded border border-black">
+                            {c.isVeg ? 'VEG' : 'NON-VEG'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="border-t-2 border-dashed border-black my-2.5" />
+
+                    {generatedPrintData.order.specialNote ? (
+                      <div className="text-xs bg-[#F8FAFC] p-1.5 rounded border border-black mb-2">
+                        <span className="font-bold">CHEF NOTE:</span> {generatedPrintData.order.specialNote}
+                      </div>
+                    ) : null}
+
+                    <div className="text-center font-bold text-[11px] mt-2">
+                      *** SEND TO KITCHEN PREPARATION ***
+                    </div>
+                  </div>
+                ) : (
+                  /* Customer Bill Tax Invoice Template */
+                  <div>
+                    <div className="text-center mb-2">
+                      {ownerTemplate.showLogo && (
+                        <div className="flex justify-center mb-1">
+                          <div className="w-10 h-10 rounded-xl bg-[#D92F43] text-white flex items-center justify-center font-extrabold text-sm shadow-xs">
+                            ED
+                          </div>
+                        </div>
+                      )}
+                      <div className="font-extrabold text-base tracking-tight">{managerSession.restaurantName}</div>
+                      {ownerTemplate.headerText && (
+                        <div className="text-[11px] text-[#64748B] italic">{ownerTemplate.headerText}</div>
+                      )}
+                      <div className="text-[11px]">{managerSession.restaurantLocation}</div>
+                      <div className="text-[11px]">Ph: {managerSession.restaurantPhone || '080 4123 4567'}</div>
+                      <div className="text-[10px] text-[#475569]">
+                        {ownerTemplate.showGst && `GSTIN: ${managerSession.gstNumber || '29AABCT1332L1Z4'}`}
+                        {ownerTemplate.showGst && ownerTemplate.showFssai && ' • '}
+                        {ownerTemplate.showFssai && `FSSAI: ${managerSession.fssai || '11223344556677'}`}
+                      </div>
+                    </div>
+
+                    <div className="border-t border-dashed border-black my-2" />
+
+                    <div className="flex justify-between font-bold text-xs">
+                      <span>{generatedPrintData.order.billNumber}</span>
+                      <span>TABLE: {generatedPrintData.order.tableNumber} ({generatedPrintData.order.tableSection})</span>
+                    </div>
+
+                    <div className="flex justify-between text-[11px]">
+                      {ownerTemplate.showCashier ? <span>Cashier: {generatedPrintData.order.serverName}</span> : <span />}
+                      <span>{generatedPrintData.order.formattedDate} {generatedPrintData.order.formattedTime}</span>
+                    </div>
+
+                    <div className="flex justify-between font-bold text-[11px]">
+                      <span>Payment: {generatedPrintData.order.paymentMethod.toUpperCase()}</span>
+                      <span>KOT Token #{generatedPrintData.order.kotToken}</span>
+                    </div>
+
+                    {generatedPrintData.order.customerName && (
+                      <div className="text-[11px]">
+                        Guest: {generatedPrintData.order.customerName}{' '}
+                        {generatedPrintData.order.customerPhone ? `(${generatedPrintData.order.customerPhone})` : ''}
+                      </div>
+                    )}
+
+                    <div className="border-t border-dashed border-black my-2" />
+
+                    <div className="flex justify-between font-bold text-xs uppercase mb-1">
+                      <span className="flex-1">ITEM</span>
+                      <span className="w-8 text-center">QTY</span>
+                      <span className="w-16 text-right">AMOUNT</span>
+                    </div>
+
+                    <div className="border-t border-black mb-1.5" />
+
+                    <div className="space-y-1">
+                      {generatedPrintData.order.items.map((c: any, idx: number) => (
+                        <div key={idx} className="flex justify-between items-baseline text-xs">
+                          <span className="flex-1 truncate">{c.name}</span>
+                          <span className="w-8 text-center">{c.quantity}</span>
+                          <span className="w-16 text-right font-medium">₹{(c.price * c.quantity).toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="border-t border-dashed border-black my-2" />
+
+                    <div className="space-y-0.5 text-xs">
+                      <div className="flex justify-between">
+                        <span>Subtotal:</span>
+                        <span>₹{generatedPrintData.order.subtotal.toFixed(2)}</span>
+                      </div>
+                      {generatedPrintData.order.discount > 0 && (
+                        <div className="flex justify-between">
+                          <span>Discount:</span>
+                          <span>-₹{generatedPrintData.order.discount.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between">
+                        <span>CGST (2.5%):</span>
+                        <span>₹{generatedPrintData.order.cgst.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>SGST (2.5%):</span>
+                        <span>₹{generatedPrintData.order.sgst.toFixed(2)}</span>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-black my-2" />
+
+                    <div className="flex justify-between font-black text-sm my-1">
+                      <span>GRAND TOTAL:</span>
+                      <span>₹{generatedPrintData.order.grandTotal.toFixed(2)}</span>
+                    </div>
+
+                    <div className="flex justify-between text-[11px]">
+                      <span>PAID VIA:</span>
+                      <span className="font-bold">{generatedPrintData.order.paymentMethod.toUpperCase()}</span>
+                    </div>
+
+                    <div className="border-t border-dashed border-black my-2.5" />
+
+                    <div className="text-center font-medium text-[11px] italic">
+                      {ownerTemplate.footerText || 'Thank you for dining with us! Visit again.'}
+                    </div>
+
+                    <div className="text-center text-[9px] text-[#64748B] mt-1">
+                      Powered by EzyDine Cloud POS
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Bottom Action Controls */}
+            <div className="pt-2 border-t border-[#F1F5F9] flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handleCopyReceiptText}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#E2E8F0] hover:bg-[#F8FAFC] text-xs font-bold text-[#0B1B29] transition-all"
+              >
+                {copiedSlip ? <Check className="w-3.5 h-3.5 text-[#16A34A]" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedSlip ? 'Copied to Clipboard' : 'Copy Slip Text'}</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                {/* Optional Hardware / System Print Button */}
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="flex items-center gap-1.5 bg-[#0B1B29] hover:bg-[#1E293B] text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs"
+                  title="Open system print dialog if you wish to spool to physical hardware printer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Send to Printer</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsGeneratePrintOpen(false);
+                    setIsTemplateEditorOpen(false);
+                  }}
+                  className="bg-[#D92F43] hover:bg-[#B82035] text-white px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DEDICATED THERMAL PRINT AREA (Formatted strictly with Owner Saved Template for Physical Spooling) */}
+      <div id="thermal-print-area" className="hidden font-mono text-[12px] p-2 leading-relaxed text-black">
+        {activePrintMode === 'kot' ? (
+          /* KOT TOKEN PRINT (NO PRICES, NO GST, STRICTLY CHEF PREPARATION COPY) */
+          <div>
+            <div style={{ textAlign: 'center', marginBottom: '6px' }}>
+              <div style={{ fontWeight: 'bold', fontSize: '16px' }}>*** KITCHEN ORDER TICKET ***</div>
+              <div style={{ fontWeight: 'extrabold', fontSize: '18px', margin: '4px 0' }}>
+                TOKEN #{activeOrderForPrint.kotToken}
+              </div>
+              <div style={{ fontSize: '11px' }}>{managerSession.restaurantName}</div>
+            </div>
+            <div style={{ borderTop: '2px dashed #000', margin: '6px 0' }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+              <span>TABLE: {activeOrderForPrint.tableNumber} ({activeOrderForPrint.tableSection})</span>
+              <span>TIME: {activeOrderForPrint.formattedTime}</span>
+            </div>
+            {ownerTemplate.showCashier && (
+              <div style={{ fontSize: '11px', color: '#333' }}>
+                Server: {activeOrderForPrint.serverName} • {activeOrderForPrint.formattedDate}
+              </div>
+            )}
+            {activeOrderForPrint.customerName && (
+              <div style={{ fontSize: '11px' }}>Guest: {activeOrderForPrint.customerName}</div>
+            )}
+            <div style={{ borderTop: '2px dashed #000', margin: '6px 0' }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '4px' }}>
+              <span>QTY  ITEM</span>
+              <span>STATUS</span>
+            </div>
+            <div style={{ borderTop: '1px solid #000', margin: '2px 0 6px 0' }} />
+            {activeOrderForPrint.items.map((c, idx) => (
+              <div
+                key={idx}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  margin: '4px 0',
+                  fontSize: '14px',
+                  fontWeight: 'bold',
+                }}
+              >
+                <span>[{c.quantity}]  {c.name}</span>
+                <span>{c.isVeg ? 'VEG' : 'NON-VEG'}</span>
+              </div>
+            ))}
+            <div style={{ borderTop: '2px dashed #000', margin: '8px 0 6px 0' }} />
+            {activeOrderForPrint.specialNote ? (
+              <div style={{ padding: '4px 0', fontSize: '12px' }}>
+                <span style={{ fontWeight: 'bold' }}>COOKING INSTRUCTIONS:</span> {activeOrderForPrint.specialNote}
+              </div>
+            ) : null}
+            <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '12px', marginTop: '6px' }}>
+              *** SEND TO KITCHEN PREPARATION ***
+            </div>
+          </div>
+        ) : (
+          /* BILL PRINT (CUSTOMER TAX INVOICE WITH OWNER SAVED TEMPLATE) */
+          <div>
+            <div style={{ textAlign: 'center', marginBottom: '8px' }}>
+              <div style={{ fontWeight: 'bold', fontSize: '16px' }}>{managerSession.restaurantName}</div>
+              {ownerTemplate.headerText && <div style={{ fontSize: '11px', fontStyle: 'italic' }}>{ownerTemplate.headerText}</div>}
+              <div>{managerSession.restaurantLocation}</div>
+              <div>Ph: {managerSession.restaurantPhone || '080 4123 4567'}</div>
+              <div>
+                {ownerTemplate.showGst && `GSTIN: ${managerSession.gstNumber || '29AABCT1332L1Z4'}`}
+                {ownerTemplate.showGst && ownerTemplate.showFssai && ' • '}
+                {ownerTemplate.showFssai && `FSSAI: ${managerSession.fssai || '11223344556677'}`}
+              </div>
+            </div>
+            <div style={{ borderTop: '1px dashed #000', margin: '4px 0' }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>{activeOrderForPrint.billNumber}</span>
+              <span>TABLE: {activeOrderForPrint.tableNumber} ({activeOrderForPrint.tableSection})</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              {ownerTemplate.showCashier ? <span>Cashier: {activeOrderForPrint.serverName}</span> : <span />}
+              <span>{activeOrderForPrint.formattedDate} {activeOrderForPrint.formattedTime}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+              <span>Payment Mode: {activeOrderForPrint.paymentMethod.toUpperCase()}</span>
+              <span>KOT Token #{activeOrderForPrint.kotToken}</span>
+            </div>
+            {activeOrderForPrint.customerName && (
+              <div>
+                Guest: {activeOrderForPrint.customerName}{' '}
+                {activeOrderForPrint.customerPhone ? `(${activeOrderForPrint.customerPhone})` : ''}
+              </div>
+            )}
+            <div style={{ borderTop: '1px dashed #000', margin: '4px 0' }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+              <span>ITEM</span>
+              <span>QTY</span>
+              <span>AMOUNT</span>
+            </div>
+            <div style={{ borderTop: '1px solid #000', margin: '2px 0 4px 0' }} />
+            {activeOrderForPrint.items.map((c, idx) => (
+              <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
+                <span style={{ flex: 1 }}>{c.name}</span>
+                <span style={{ width: '30px', textAlign: 'center' }}>{c.quantity}</span>
+                <span style={{ width: '60px', textAlign: 'right' }}>₹{(c.price * c.quantity).toFixed(2)}</span>
+              </div>
+            ))}
+            <div style={{ borderTop: '1px dashed #000', margin: '4px 0' }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Subtotal:</span>
+              <span>₹{activeOrderForPrint.subtotal.toFixed(2)}</span>
+            </div>
+            {activeOrderForPrint.discount > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Discount:</span>
+                <span>-₹{activeOrderForPrint.discount.toFixed(2)}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>CGST (2.5%):</span>
+              <span>₹{activeOrderForPrint.cgst.toFixed(2)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>SGST (2.5%):</span>
+              <span>₹{activeOrderForPrint.sgst.toFixed(2)}</span>
+            </div>
+            <div style={{ borderTop: '1px solid #000', margin: '4px 0' }} />
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontWeight: 'bold',
+                fontSize: '14px',
+                marginTop: '2px',
+              }}
+            >
+              <span>GRAND TOTAL:</span>
+              <span>₹{activeOrderForPrint.grandTotal.toFixed(2)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginTop: '2px' }}>
+              <span>PAID VIA:</span>
+              <span style={{ fontWeight: 'bold' }}>{activeOrderForPrint.paymentMethod.toUpperCase()}</span>
+            </div>
+            <div style={{ borderTop: '1px dashed #000', margin: '6px 0' }} />
+            <div style={{ textAlign: 'center', fontStyle: 'italic', fontSize: '11px' }}>
+              {ownerTemplate.footerText || 'Thank you for dining with us! Visit again.'}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
