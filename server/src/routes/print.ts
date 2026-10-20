@@ -21,9 +21,20 @@ function runCmd(command: string): Promise<string> {
 // 1. GET Connected Printers
 router.get('/printers', async (req: Request, res: Response) => {
   try {
-    const stdout = await runCmd('lpstat -p -d');
-    const lines = stdout.split('\n');
+    let stdout = '';
+    try {
+      stdout = await runCmd('lpstat -p -d');
+    } catch (e: any) {
+      // CUPS not installed or no printers added (typical on cloud VPS / Docker)
+      return res.json({
+        success: true,
+        defaultPrinter: '',
+        printers: [],
+        message: 'No CUPS hardware printers installed on backend host.',
+      });
+    }
 
+    const lines = stdout.split('\n');
     let defaultPrinter = '';
     const printers: Array<{ name: string; status: string; isDefault: boolean }> = [];
 
@@ -65,10 +76,11 @@ router.get('/printers', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Error discovering printers:', error);
-    return res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to discover printers',
+    return res.json({
+      success: true,
+      defaultPrinter: '',
       printers: [],
+      error: error.message || 'Printer discovery unavailable',
     });
   }
 });
@@ -321,8 +333,20 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const { printerName, type = 'bill', order, template, width = '58mm' } = req.body;
 
-    // Discover system printers
-    const printersOutput = await runCmd('lpstat -p -d');
+    // Discover system printers safely
+    let printersOutput = '';
+    try {
+      printersOutput = await runCmd('lpstat -p -d');
+    } catch {
+      // Server does not have local CUPS printers (e.g. cloud VPS)
+      return res.json({
+        success: true,
+        printedViaServer: false,
+        fallbackToBrowser: true,
+        message: 'No CUPS thermal printer configured on server. Handing off to browser printing.',
+      });
+    }
+
     let targetPrinter = printerName;
 
     if (!targetPrinter || targetPrinter.includes('Default') || targetPrinter === 'Auto-Detect') {
@@ -338,9 +362,11 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     if (!targetPrinter) {
-      return res.status(400).json({
-        success: false,
-        error: 'No connected thermal printer found on system.',
+      return res.json({
+        success: true,
+        printedViaServer: false,
+        fallbackToBrowser: true,
+        message: 'No connected thermal printer found on server. Handing off to browser printing.',
       });
     }
 

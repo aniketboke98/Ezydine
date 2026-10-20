@@ -129,18 +129,16 @@ export interface RealPrinterDevice {
 }
 
 const getApiBaseUrl = () => {
-  if (process.env.NEXT_PUBLIC_API_URL) {
-    return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '');
-  }
   if (typeof window !== 'undefined') {
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return 'http://localhost:5001/api';
-    }
-    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(window.location.hostname)) {
+    // If accessing from a remote IP (e.g. VPS or LAN), target that same host on port 5001
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
       return `http://${window.location.hostname}:5001/api`;
     }
   }
-  return 'https://api.ezydine.in/api';
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '');
+  }
+  return 'http://localhost:5001/api';
 };
 
 const apiFetch = async (endpoint: string, options: RequestInit = {}): Promise<Response> => {
@@ -1218,14 +1216,16 @@ export default function ManagerOrderPortal() {
       });
 
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.printer && !data.fallbackToBrowser) {
         setPrintStatusMessage(`✓ Printed directly to ${data.printer || activePrinter.name}`);
       } else {
-        setPrintStatusMessage(`⚠️ Print error: ${data.error || 'Failed to dispatch to hardware'}`);
+        setPrintStatusMessage('Opening printer system dialog...');
+        setTimeout(() => window.print(), 150);
       }
     } catch (err: any) {
-      console.error('Error dispatching direct print:', err);
-      setPrintStatusMessage(`⚠️ Print error: ${err.message || 'Cannot reach local print service'}`);
+      console.warn('Direct print backend unreachable, falling back to browser print:', err);
+      setPrintStatusMessage('Opening printer system dialog...');
+      setTimeout(() => window.print(), 150);
     } finally {
       setIsDirectPrinting(false);
       setTimeout(() => {
@@ -3656,16 +3656,30 @@ export default function ManagerOrderPortal() {
               </button>
 
               <div className="flex items-center gap-2">
-                {/* DIRECT AUTOMATIC THERMAL PRINT - ZERO BROWSER POP-UP */}
+                {/* BROWSER / SYSTEM PRINT DIALOG (For USB, Bluetooth, or Local Thermal Printers) */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    playReceiptChime();
+                    window.print();
+                  }}
+                  className="flex items-center gap-1.5 bg-[#D92F43] hover:bg-[#B82035] text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs"
+                  title="Print to any local or USB thermal printer via system dialog"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Slip</span>
+                </button>
+
+                {/* DIRECT AUTOMATIC THERMAL PRINT (CUPS) */}
                 <button
                   type="button"
                   disabled={isDirectPrinting}
                   onClick={handleDirectHardwarePrint}
                   className="flex items-center gap-1.5 bg-[#0B1B29] hover:bg-[#1E293B] text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs disabled:opacity-75"
-                  title="Direct automatic print without opening browser system pop-up"
+                  title="Direct automatic hardware spooling to CUPS server printer"
                 >
                   <Printer className={`w-3.5 h-3.5 ${isDirectPrinting ? 'animate-bounce text-[#10B981]' : ''}`} />
-                  <span>{isDirectPrinting ? 'Printing Directly...' : 'Direct Print (Auto)'}</span>
+                  <span>{isDirectPrinting ? 'Printing...' : 'Direct Print (Auto)'}</span>
                 </button>
 
                 <button

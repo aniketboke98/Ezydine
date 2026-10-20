@@ -577,10 +577,23 @@ router.post('/manager-login', async (req: Request, res: Response) => {
     const cleanIdentifier = (typeof rawIdentifier === 'string' ? rawIdentifier : String(rawIdentifier)).trim();
     const cleanPin = String(pin).trim();
 
+    // Support flexible phone matching (with or without +91, 0, or formatting)
+    const digitsOnly = cleanIdentifier.replace(/\D/g, '');
+    const phoneList = [cleanIdentifier];
+    if (digitsOnly.length >= 10) {
+      const last10 = digitsOnly.slice(-10);
+      phoneList.push(last10);
+      phoneList.push(`+91${last10}`);
+      phoneList.push(`+91 ${last10}`);
+      phoneList.push(`0${last10}`);
+    }
+
+    console.log(`[MANAGER-LOGIN] Attempt for "${cleanIdentifier}" (matching: ${phoneList.join(', ')}) with PIN "${cleanPin}"`);
+
     // 1. Check Staff Member
     const staff = await prisma.staffMember.findFirst({
       where: {
-        phone: cleanIdentifier,
+        phone: { in: phoneList },
         pin: cleanPin,
         isActive: true,
       },
@@ -626,7 +639,7 @@ router.post('/manager-login', async (req: Request, res: Response) => {
     // 2. Check Owner
     const owner = await prisma.user.findFirst({
       where: {
-        OR: [{ phone: cleanIdentifier }, { email: cleanIdentifier }],
+        OR: [{ phone: { in: phoneList } }, { email: cleanIdentifier }],
       },
       include: {
         restaurants: { orderBy: { id: 'desc' }, take: 1 },
