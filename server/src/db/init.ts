@@ -127,23 +127,6 @@ export async function initializeDatabase() {
       );
     `);
 
-    // 8b. Staff Attendance table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS staff_attendance (
-        id SERIAL PRIMARY KEY,
-        restaurant_id INTEGER REFERENCES restaurant_profile(id) ON DELETE CASCADE,
-        staff_id INTEGER REFERENCES staff_members(id) ON DELETE CASCADE,
-        date DATE NOT NULL DEFAULT CURRENT_DATE,
-        clock_in VARCHAR(20),
-        clock_out VARCHAR(20),
-        status VARCHAR(20) DEFAULT 'present',
-        shift VARCHAR(30) DEFAULT 'Full Day',
-        notes TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (restaurant_id, staff_id, date)
-      );
-    `);
-
     // 9. Tables (linked to restaurant_profile)
     await client.query(`
       CREATE TABLE IF NOT EXISTS tables (
