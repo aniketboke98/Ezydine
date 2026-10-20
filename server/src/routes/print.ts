@@ -232,8 +232,6 @@ function formatReceiptText(data: {
     }
     lines.push(centerText('-- Expedite Kitchen Order --', width));
   }
-    lines.push(centerText('-- Expedite Kitchen Order --', width));
-  }
 
   // Footer
   lines.push('');
