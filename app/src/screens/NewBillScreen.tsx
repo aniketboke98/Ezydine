@@ -70,6 +70,11 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
   const loadMenuAndRestaurant = async () => {
     setIsLoadingMenu(true);
     try {
+      const cached = await api.getRestaurant().catch(() => null);
+      if (cached && (cached.name || cached.restaurant_name)) {
+        setRestaurantName(cached.name || cached.restaurant_name);
+      }
+
       const [menuRes, profileRes] = await Promise.allSettled([
         api.menu.getAll(),
         api.restaurant.getProfile(),
@@ -96,8 +101,11 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
         setMenuItems(MOCK_MENU_ITEMS);
       }
 
-      if (profileRes.status === 'fulfilled' && profileRes.value.success && profileRes.value.restaurant) {
-        setRestaurantName(profileRes.value.restaurant.name || 'Ezydine Restaurant');
+      if (profileRes.status === 'fulfilled' && profileRes.value?.success) {
+        const prof = profileRes.value.profile || profileRes.value.restaurant;
+        if (prof && (prof.name || prof.restaurant_name)) {
+          setRestaurantName(prof.name || prof.restaurant_name);
+        }
       }
     } catch (e) {
       console.warn('Failed to fetch menu:', e);
@@ -108,6 +116,11 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
   };
 
   useEffect(() => {
+    api.getRestaurant().then((cached) => {
+      if (cached && (cached.name || cached.restaurant_name)) {
+        setRestaurantName(cached.name || cached.restaurant_name);
+      }
+    }).catch(() => null);
     loadMenuAndRestaurant();
   }, []);
 

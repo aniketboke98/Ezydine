@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { Colors } from '../theme/colors';
 import { EzyDineLogo } from '../components/EzyDineLogo';
 import { BluetoothPrinterModal, BluetoothDevice } from '../components/BluetoothPrinterModal';
 import { ReceiptSettingsModal, ReceiptConfig } from '../components/ReceiptSettingsModal';
+import { api } from '../services/api';
 
 interface ReceiptScreenProps {
   onBack: () => void;
@@ -26,6 +27,35 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
 }) => {
   const [isBluetoothModalOpen, setIsBluetoothModalOpen] = useState(false);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [restaurantProfile, setRestaurantProfile] = useState<any>({
+    name: 'Restaurant',
+    location: '',
+    phone: '',
+    gstNumber: '',
+    fssai: '',
+  });
+
+  useEffect(() => {
+    api.getRestaurant().then((cached) => {
+      if (cached) {
+        setRestaurantProfile((prev: any) => ({
+          ...prev,
+          name: cached.name || cached.restaurant_name || prev.name,
+          location: cached.location || cached.address || prev.location,
+          phone: cached.phone || prev.phone,
+          gstNumber: cached.gstNumber || cached.gst_number || prev.gstNumber,
+          fssai: cached.fssai || prev.fssai,
+        }));
+      }
+    }).catch(() => null);
+
+    api.restaurant.getProfile().then((res) => {
+      const p = res?.profile || res?.restaurant;
+      if (res?.success && p) {
+        setRestaurantProfile(p);
+      }
+    }).catch(() => null);
+  }, []);
 
   // Bluetooth Printer state
   const [connectedPrinter, setConnectedPrinter] = useState<BluetoothDevice | null>({
@@ -43,7 +73,7 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
     showLogo: true,
     showGst: true,
     showFssai: true,
-    headerText: 'The Curry House · Authentic Flavors',
+    headerText: 'Authentic Flavors',
     footerText: 'Thank you for dining with us! Visit again.',
     paperWidth: '58mm',
   });
@@ -51,7 +81,7 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
   const handleShare = async () => {
     try {
       await Share.share({
-        message: 'The Curry House - Bill #1048 for Table 04. Total: ₹630.00. Thank you for dining with us!',
+        message: `${restaurantProfile.name || 'Restaurant'} - Bill #1048 for Table 04. Total: ₹630.00. Thank you for dining with us!`,
       });
     } catch (e) {
       // Ignored
@@ -208,23 +238,26 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
 
             {/* Restaurant Info */}
             <View style={styles.outletSection}>
-              <Text style={styles.outletTitle}>The Curry House</Text>
+              <Text style={styles.outletTitle}>{restaurantProfile.name || 'Restaurant'}</Text>
               {receiptConfig.headerText ? (
                 <Text style={styles.outletSubheader}>
                   {receiptConfig.headerText}
                 </Text>
               ) : null}
-              <Text style={styles.outletAddress}>
-                12, 100 Feet Road, Indiranagar, Bengaluru
-              </Text>
-              {receiptConfig.showGst && (
-                <Text style={styles.outletGstin}>
-                  GSTIN: 29ABCDE1234F1Z5 · Ph: 080 4123 4567
+              {Boolean(restaurantProfile.location || restaurantProfile.address) && (
+                <Text style={styles.outletAddress}>
+                  {restaurantProfile.location || restaurantProfile.address}
                 </Text>
               )}
-              {receiptConfig.showFssai && (
+              {receiptConfig.showGst && (
+                <Text style={styles.outletGstin}>
+                  {restaurantProfile.gstNumber || restaurantProfile.gst_number ? `GSTIN: ${restaurantProfile.gstNumber || restaurantProfile.gst_number}` : ''}
+                  {restaurantProfile.phone ? ` · Ph: ${restaurantProfile.phone}` : ''}
+                </Text>
+              )}
+              {receiptConfig.showFssai && Boolean(restaurantProfile.fssai) && (
                 <Text style={styles.outletFssai}>
-                  FSSAI Lic: 11223344000123
+                  FSSAI Lic: {restaurantProfile.fssai}
                 </Text>
               )}
             </View>

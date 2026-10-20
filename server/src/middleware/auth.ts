@@ -81,7 +81,7 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
       const restRes = await query('SELECT * FROM restaurant_profile WHERE id = $1', [resolvedRestId]);
       restaurant = restRes.rows[0] || null;
     } else {
-      const restRes = await query('SELECT * FROM restaurant_profile WHERE user_id = $1 LIMIT 1', [user.id]);
+      const restRes = await query('SELECT * FROM restaurant_profile WHERE user_id = $1 ORDER BY id DESC LIMIT 1', [user.id]);
       restaurant = restRes.rows[0] || null;
       if (restaurant) resolvedRestId = restaurant.id;
     }

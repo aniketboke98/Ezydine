@@ -67,8 +67,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   });
 
   const [restaurantProfile, setRestaurantProfile] = useState({
-    name: 'The Curry House',
-    location: 'Indiranagar, Bengaluru',
+    name: 'Restaurant',
+    location: '',
   });
 
   const [tablesList, setTablesList] = useState<TableSummary[]>([]);
@@ -76,18 +76,28 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const loadAllData = async () => {
     try {
+      // 0. Instant cached restaurant info
+      const cached = await api.getRestaurant().catch(() => null);
+      if (cached && (cached.name || cached.restaurant_name)) {
+        setRestaurantProfile({
+          name: cached.name || cached.restaurant_name,
+          location: cached.location || cached.address || 'India',
+        });
+      }
+
       // 1. Dashboard real stats
       const dashRes = await api.reports.getDashboard().catch(() => null);
       if (dashRes && dashRes.success && dashRes.stats) {
         setStats(dashRes.stats);
       }
 
-      // 2. Restaurant Profile
+      // 2. Restaurant Profile (fresh from server)
       const profRes = await api.restaurant.getProfile().catch(() => null);
-      if (profRes && profRes.success && profRes.profile) {
+      const activeProf = profRes?.profile || profRes?.restaurant;
+      if (activeProf && (activeProf.name || activeProf.restaurant_name)) {
         setRestaurantProfile({
-          name: profRes.profile.name || 'The Curry House',
-          location: profRes.profile.location || 'Bengaluru',
+          name: activeProf.name || activeProf.restaurant_name,
+          location: activeProf.location || activeProf.address || 'India',
         });
       }
 
@@ -119,6 +129,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   };
 
   useEffect(() => {
+    // Initial quick load from local storage
+    api.getRestaurant().then((cached) => {
+      if (cached && (cached.name || cached.restaurant_name)) {
+        setRestaurantProfile({
+          name: cached.name || cached.restaurant_name,
+          location: cached.location || cached.address || 'India',
+        });
+      }
+    }).catch(() => null);
+
     loadAllData();
   }, []);
 

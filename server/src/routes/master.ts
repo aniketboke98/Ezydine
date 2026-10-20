@@ -70,14 +70,35 @@ router.post('/create-app-login', async (req: Request, res: Response) => {
 
     const user = userRes.rows[0];
 
-    // 2. Create or update restaurant profile
-    const restRes = await query(`
-      INSERT INTO restaurant_profile (user_id, name, location, phone)
-      VALUES ($1, $2, $3, $4)
-      RETURNING *
-    `, [user.id, cleanRestName, cleanLocation, cleanPhone]);
+    // 2. Create or update restaurant profile for this user
+    const existingRest = await query(
+      `SELECT id FROM restaurant_profile WHERE user_id = $1 ORDER BY id DESC LIMIT 1`,
+      [user.id]
+    );
 
-    const restaurant = restRes.rows[0];
+    let restaurant;
+    if (existingRest.rows.length > 0) {
+      const restUpdate = await query(`
+        UPDATE restaurant_profile
+        SET name = $1, location = $2, phone = $3, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $4
+        RETURNING *
+      `, [cleanRestName, cleanLocation, cleanPhone, existingRest.rows[0].id]);
+      restaurant = restUpdate.rows[0];
+
+      // Remove any duplicate old profiles for this user to avoid stale name lookups
+      await query(
+        `DELETE FROM restaurant_profile WHERE user_id = $1 AND id != $2`,
+        [user.id, restaurant.id]
+      );
+    } else {
+      const restRes = await query(`
+        INSERT INTO restaurant_profile (user_id, name, location, phone)
+        VALUES ($1, $2, $3, $4)
+        RETURNING *
+      `, [user.id, cleanRestName, cleanLocation, cleanPhone]);
+      restaurant = restRes.rows[0];
+    }
 
     // 3. Create active subscription (30 days validity)
     const expiresAt = new Date();

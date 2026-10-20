@@ -14,6 +14,7 @@ router.get('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
               kot_enabled as "kotEnabled", logo_url as "logoUrl"
        FROM restaurant_profile
        WHERE user_id = $1
+       ORDER BY id DESC
        LIMIT 1`,
       [userId]
     );
@@ -22,7 +23,7 @@ router.get('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ success: false, error: 'Restaurant profile not found' });
     }
 
-    return res.json({ success: true, profile: result.rows[0] });
+    return res.json({ success: true, profile: result.rows[0], restaurant: result.rows[0] });
   } catch (error) {
     return res.status(500).json({ success: false, error: 'Failed to fetch restaurant profile' });
   }

@@ -1,10 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-const BASE_URL = Platform.select({
-  android: 'https://api.ezydine.in/api',
-  default: 'https://api.ezydine.in/api',
-});
+const BASE_URL = 'https://api.ezydine.in/api';
 
 const TOKEN_KEY = '@ezydine_auth_token';
 const USER_KEY = '@ezydine_user_data';
@@ -103,6 +100,26 @@ class ApiService {
   async clearAuth() {
     this.token = null;
     await safeStorage.multiRemove([TOKEN_KEY, USER_KEY, RESTAURANT_KEY, PLAN_KEY]);
+  }
+
+  async getRestaurant(): Promise<any | null> {
+    const raw = await safeStorage.getItem(RESTAURANT_KEY);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  async getUser(): Promise<any | null> {
+    const raw = await safeStorage.getItem(USER_KEY);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
   }
 
   private async request(endpoint: string, options: RequestInit = {}): Promise<any> {

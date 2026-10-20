@@ -45,16 +45,13 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
 
     try {
       const response = await api.auth.sendOtp(identifier.trim());
-      if (response.success) {
+      if (response && response.success) {
         onProceedToOtp(identifier.trim(), response.otp);
       } else {
-        setErrorMsg(response.error || 'Failed to send OTP code');
+        setErrorMsg(response?.error || 'This mobile number is not registered. Please contact Master Admin.');
       }
     } catch (err: any) {
-      // In case of backend connection issue
-      console.warn('Network issue calling backend:', err);
-      const fallbackOtp = Math.floor(100000 + Math.random() * 900000).toString();
-      onProceedToOtp(identifier.trim(), fallbackOtp);
+      setErrorMsg(err.message || 'This mobile number is not registered. Please contact Master Admin to create your account.');
     } finally {
       setLoading(false);
     }

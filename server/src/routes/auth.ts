@@ -16,6 +16,24 @@ router.post('/send-otp', async (req: Request, res: Response) => {
     }
 
     const cleanIdentifier = identifier.trim();
+
+    // STRICT CHECK: Only registered users / staff are allowed to request OTP and log in
+    const userCheck = await query(
+      `SELECT id, phone FROM users WHERE phone = $1 OR email = $1 LIMIT 1`,
+      [cleanIdentifier]
+    );
+    const staffCheck = await query(
+      `SELECT id, phone FROM staff_members WHERE phone = $1 AND is_active = true LIMIT 1`,
+      [cleanIdentifier]
+    );
+
+    if (userCheck.rows.length === 0 && staffCheck.rows.length === 0) {
+      return res.status(403).json({
+        success: false,
+        error: 'This mobile number is not registered. Please contact support@ezydine.in to create your restaurant account.',
+      });
+    }
+
     // Generate true random 6-digit OTP
     const code = Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -72,7 +90,7 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
       await query('UPDATE otp_codes SET used = true WHERE id = $1', [otpResult.rows[0].id]);
     }
 
-    // Find or create user
+    // STRICT CHECK: Find registered user (DO NOT auto-create unverified accounts)
     let userResult = await query(
       `SELECT * FROM users WHERE phone = $1 OR email = $1 LIMIT 1`,
       [cleanIdentifier]
@@ -80,30 +98,32 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
 
     let user;
     if (userResult.rows.length === 0) {
-      const isEmail = cleanIdentifier.includes('@');
-      const newUser = await query(
-        `INSERT INTO users (phone, email, full_name, role)
-         VALUES ($1, $2, $3, 'owner')
-         RETURNING *`,
-        [isEmail ? '9876543210' : cleanIdentifier, isEmail ? cleanIdentifier : null, 'Restaurant Manager']
-      );
-      user = newUser.rows[0];
-
-      // Create default restaurant profile
-      await query(
-        `INSERT INTO restaurant_profile (user_id, name, location, phone)
-         VALUES ($1, 'My Restaurant', 'Main Street', $2)`,
-        [user.id, cleanIdentifier]
+      // Check if user is an active staff member
+      const staffCheck = await query(
+        `SELECT s.*, r.user_id as owner_user_id 
+         FROM staff_members s
+         JOIN restaurant_profile r ON r.id = s.restaurant_id
+         WHERE s.phone = $1 AND s.is_active = true 
+         ORDER BY s.id DESC LIMIT 1`,
+        [cleanIdentifier]
       );
 
-      // Create starter subscription (Plan 1: ₹2,999 for 3 devices)
-      const oneMonth = new Date();
-      oneMonth.setDate(oneMonth.getDate() + 30);
-      await query(
-        `INSERT INTO subscriptions (user_id, plan_id, status, expires_at, amount_paid)
-         VALUES ($1, 'plan_starter_3000', 'active', $2, 2999)`,
-        [user.id, oneMonth]
-      );
+      if (staffCheck.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'This account is not registered. Please contact Master Admin to create your restaurant access.',
+        });
+      }
+
+      const ownerUser = await query(`SELECT * FROM users WHERE id = $1`, [staffCheck.rows[0].owner_user_id]);
+      if (ownerUser.rows.length > 0) {
+        user = ownerUser.rows[0];
+      } else {
+        return res.status(404).json({
+          success: false,
+          error: 'Restaurant account configuration error. Please contact Master Admin.',
+        });
+      }
     } else {
       user = userResult.rows[0];
     }
@@ -165,9 +185,9 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
       { expiresIn: '30d' }
     );
 
-    // Fetch restaurant details
+    // Fetch latest restaurant details
     const restResult = await query(
-      `SELECT * FROM restaurant_profile WHERE user_id = $1 LIMIT 1`,
+      `SELECT * FROM restaurant_profile WHERE user_id = $1 ORDER BY id DESC LIMIT 1`,
       [user.id]
     );
 
@@ -197,7 +217,7 @@ router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const user = req.user!;
     const restResult = await query(
-      `SELECT * FROM restaurant_profile WHERE user_id = $1 LIMIT 1`,
+      `SELECT * FROM restaurant_profile WHERE user_id = $1 ORDER BY id DESC LIMIT 1`,
       [user.id]
     );
 

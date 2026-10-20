@@ -70,24 +70,38 @@ export const ProfileSettingsScreen: React.FC<ProfileSettingsScreenProps> = ({
   });
 
   const [profile, setProfile] = useState<any>({
-    name: 'The Curry House',
-    location: 'Indiranagar, Bengaluru',
-    phone: '080 4123 4567',
+    name: 'Restaurant',
+    location: '',
+    phone: '',
     gstRate: '5.0',
-    gstNumber: '29AABCT1332L1Z4',
+    gstNumber: '',
   });
 
   useEffect(() => {
+    // Quick load from local cache
+    api.getRestaurant().then((cached) => {
+      if (cached) {
+        setProfile((prev: any) => ({
+          ...prev,
+          name: cached.name || cached.restaurant_name || prev.name,
+          location: cached.location || cached.address || prev.location,
+          phone: cached.phone || prev.phone,
+          gstNumber: cached.gstNumber || cached.gst_number || prev.gstNumber,
+        }));
+      }
+    }).catch(() => null);
+
     const fetchProfile = async () => {
       try {
         const res = await api.restaurant.getProfile();
-        if (res.success && res.profile) {
-          setProfile(res.profile);
-          if (res.profile.thermalPaperWidth) {
-            setPaperWidth(res.profile.thermalPaperWidth);
+        const p = res?.profile || res?.restaurant;
+        if (res?.success && p) {
+          setProfile(p);
+          if (p.thermalPaperWidth || p.thermal_paper_width) {
+            setPaperWidth(p.thermalPaperWidth || p.thermal_paper_width);
           }
-          if (res.profile.kotEnabled !== undefined) {
-            setKotPrintingEnabled(res.profile.kotEnabled);
+          if (p.kotEnabled !== undefined || p.kot_enabled !== undefined) {
+            setKotPrintingEnabled(p.kotEnabled !== undefined ? p.kotEnabled : p.kot_enabled);
           }
         }
       } catch (e) {
