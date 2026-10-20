@@ -1173,9 +1173,9 @@ export default function ManagerOrderPortal() {
           order: currentOrder,
           template: {
             storeName: managerSession?.restaurantName || 'EZYDINE RESTOBAR',
-            phone: managerSession?.phone || '9876543210',
-            address: managerSession?.restaurantAddress || 'Bengaluru, India',
-            gstNo: managerSession?.gstNo || '',
+            phone: managerSession?.restaurantPhone || managerSession?.identifier || '9876543210',
+            address: managerSession?.restaurantLocation || 'Bengaluru, India',
+            gstNo: managerSession?.gstNumber || '',
             footerMsg: ownerTemplate.footerText,
           },
         }),

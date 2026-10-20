@@ -53,7 +53,6 @@ router.get('/printers', async (req: Request, res: Response) => {
       }
     }
 
-    // If defaultPrinter is not found, fallback to first printer
     if (!defaultPrinter && printers.length > 0) {
       defaultPrinter = printers[0].name;
       printers[0].isDefault = true;
@@ -74,30 +73,36 @@ router.get('/printers', async (req: Request, res: Response) => {
   }
 });
 
-// Helper: Center text within width (58mm = 32 chars, 80mm = 48 chars)
+// Helper: Center text within width (58mm = 30 chars, 80mm = 42 chars)
 function centerText(text: string, width: number): string {
-  if (text.length >= width) return text.substring(0, width);
-  const left = Math.floor((width - text.length) / 2);
-  return ' '.repeat(left) + text;
+  const clean = text.trim();
+  if (clean.length >= width) return clean.substring(0, width);
+  const left = Math.floor((width - clean.length) / 2);
+  return ' '.repeat(left) + clean;
 }
 
-// Helper: Justify text left and right
+// Helper: Justify text left and right within exact width
 function justifyLine(left: string, right: string, width: number): string {
-  const space = width - left.length - right.length;
+  const l = left.trim();
+  const r = right.trim();
+  const space = width - l.length - r.length;
   if (space <= 0) {
-    return left.substring(0, width - right.length - 1) + ' ' + right;
+    const maxLeft = Math.max(1, width - r.length - 1);
+    return l.substring(0, maxLeft) + ' ' + r;
   }
-  return left + ' '.repeat(space) + right;
+  return l + ' '.repeat(space) + r;
 }
 
-// Helper: Format Order for POS Thermal Receipt (58mm or 80mm)
+// Helper: Format Order for POS Thermal Receipt (Clean 30/42 column text)
 function formatReceiptText(data: {
   type: 'bill' | 'kot' | 'test';
   order?: any;
   template?: any;
   width?: '58mm' | '80mm';
 }): string {
-  const width = data.width === '80mm' ? 48 : 32;
+  // 58mm thermal printers have 384 dots width = 30-32 chars. 30 chars guarantees NO right margin overflow.
+  // 80mm thermal printers have 576 dots width = 42-48 chars. 42 chars guarantees clean formatting.
+  const width = data.width === '80mm' ? 42 : 30;
   const divider = '='.repeat(width);
   const thinDivider = '-'.repeat(width);
 
@@ -110,21 +115,17 @@ function formatReceiptText(data: {
 
   const lines: string[] = [];
 
-  // Reset & Header
-  lines.push('');
-  lines.push(centerText(storeName.toUpperCase(), width));
-  if (phone) lines.push(centerText(`Ph: ${phone}`, width));
-  if (address) lines.push(centerText(address, width));
-  if (gstNo) lines.push(centerText(`GSTIN: ${gstNo}`, width));
-  lines.push(divider);
-
+  // HARDWARE TEST SLIP
   if (data.type === 'test') {
+    lines.push('');
+    lines.push(centerText(storeName.toUpperCase(), width));
+    lines.push(divider);
     lines.push(centerText('** HARDWARE TEST SLIP **', width));
     lines.push(divider);
     lines.push(justifyLine('Printer Status:', 'ONLINE / READY', width));
-    lines.push(justifyLine('Paper Roll Width:', `${width === 48 ? '80mm (48 Col)' : '58mm (32 Col)'}`, width));
-    lines.push(justifyLine('Time:', new Date().toLocaleTimeString(), width));
-    lines.push(justifyLine('Date:', new Date().toLocaleDateString(), width));
+    lines.push(justifyLine('Paper Roll:', width === 42 ? '80mm (42 Col)' : '58mm (30 Col)', width));
+    lines.push(justifyLine('Time:', new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }), width));
+    lines.push(justifyLine('Date:', new Date().toLocaleDateString('en-IN'), width));
     lines.push(thinDivider);
     lines.push(centerText('Ezydine POS Hardware Link OK', width));
     lines.push(divider);
@@ -135,113 +136,184 @@ function formatReceiptText(data: {
   const order = data.order || {};
   const isKOT = data.type === 'kot';
 
-  // Receipt / KOT Title
+  // KOT (KITCHEN ORDER TICKET)
   if (isKOT) {
-    lines.push(centerText('*** KITCHEN ORDER TICKET (KOT) ***', width));
-  } else {
-    lines.push(centerText('TAX INVOICE / CASH BILL', width));
-  }
-  lines.push(divider);
+    const token = order.kotToken ? `TOKEN #${order.kotToken}` : (order.orderNumber || 'KOT TOKEN');
+    const tableNo = order.tableNumber || order.table || 'Table';
+    const section = order.tableSection ? ` (${order.tableSection})` : '';
+    const serverName = order.serverName || 'Staff';
+    const timeStr = order.formattedTime || new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    const dateStr = order.formattedDate || new Date().toLocaleDateString('en-IN');
 
-  // Meta Info
-  const orderId = isKOT
-    ? (order.kotToken ? `TOKEN #${order.kotToken}` : (order.orderNumber || 'KOT-101'))
-    : (order.billNumber || order.orderNumber || `BILL-${Date.now().toString().slice(-4)}`);
+    lines.push(centerText('*** KITCHEN ORDER TICKET ***', width));
+    lines.push(centerText(token, width));
+    lines.push(thinDivider);
+    lines.push(justifyLine(`TABLE: ${tableNo}${section}`, `DINE-IN`, width));
+    lines.push(justifyLine(`Server: ${serverName}`, timeStr, width));
+    lines.push(thinDivider);
+    lines.push(justifyLine('ITEM (PREPARATION)', 'QTY', width));
+    lines.push(thinDivider);
+
+    const items = order.items || [];
+    for (const item of items) {
+      const name = (item.name || 'Item').trim();
+      const qty = item.quantity || 1;
+      const qtyStr = `x${qty}`;
+
+      // Left column for item name, right column for quantity
+      lines.push(justifyLine(name, qtyStr, width));
+
+      const note = item.notes || item.specialNote;
+      if (note) {
+        lines.push(` * Note: ${note.trim()}`);
+      }
+    }
+    lines.push(thinDivider);
+
+    const chefNote = order.specialNote || order.notes;
+    if (chefNote) {
+      lines.push('SPECIAL INSTRUCTIONS:');
+      lines.push(`${chefNote.trim()}`);
+      lines.push(thinDivider);
+    }
+
+    lines.push(centerText('-- Expedite Kitchen Order --', width));
+    lines.push('\n\n');
+    return lines.join('\n');
+  }
+
+  // CUSTOMER TAX INVOICE / CASH BILL
+  const billNum = order.billNumber || order.orderNumber || `BILL #${Math.floor(1000 + Math.random() * 9000)}`;
   const tableNo = order.tableNumber || order.table || 'Direct';
   const payMethod = (order.paymentMethod || 'CASH').toUpperCase();
   const dateStr = order.formattedDate && order.formattedTime
     ? `${order.formattedDate} ${order.formattedTime}`
-    : (order.createdAt ? new Date(order.createdAt).toLocaleString() : new Date().toLocaleString());
+    : (order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-IN') : new Date().toLocaleDateString('en-IN'));
 
-  lines.push(justifyLine(`Table: ${tableNo}`, `Type: Dine-In`, width));
-  lines.push(justifyLine(orderId, isKOT ? 'PREP' : payMethod, width));
-  lines.push(justifyLine('Time:', dateStr, width));
+  // Header Details (Tight & compact layout, no wasted paper)
+  lines.push(centerText(storeName.toUpperCase(), width));
+  if (address) {
+    const addrWords = address.split(' ');
+    let currentLine = '';
+    for (const word of addrWords) {
+      if ((currentLine + ' ' + word).trim().length <= width) {
+        currentLine = (currentLine + ' ' + word).trim();
+      } else {
+        if (currentLine) lines.push(centerText(currentLine, width));
+        currentLine = word;
+      }
+    }
+    if (currentLine) lines.push(centerText(currentLine, width));
+  }
+  if (phone) lines.push(centerText(`Ph: ${phone}`, width));
+  if (gstNo) lines.push(centerText(`GSTIN: ${gstNo}`, width));
+
+  // Single clean divider into Bill Info (Removes excessive space)
+  lines.push(thinDivider);
+  lines.push(justifyLine(billNum, `Table: ${tableNo}`, width));
+  lines.push(justifyLine(dateStr, payMethod, width));
+  if (order.customerName) {
+    lines.push(justifyLine(`Guest: ${order.customerName}`, '', width));
+  }
   lines.push(thinDivider);
 
-  // Items Header
-  if (isKOT) {
-    lines.push(justifyLine('ITEM (KITCHEN PREP)', 'QTY', width));
+  // Column Headers (58mm = 30 col: Item 16, Qty 4, Amount 10)
+  // (80mm = 42 col: Item 22, Qty 5, Rate 7, Amount 8)
+  if (width === 42) {
+    lines.push('ITEM                   QTY    RATE   TOTAL');
   } else {
-    if (width === 48) {
-      lines.push('ITEM                              QTY   AMOUNT');
-    } else {
-      lines.push(justifyLine('ITEM', 'QTY  TOTAL', width));
-    }
+    lines.push('ITEM             QTY    AMOUNT');
   }
   lines.push(thinDivider);
 
   // Items List
   const items = order.items || [];
   for (const item of items) {
-    const name = item.name || 'Item';
+    const name = (item.name || 'Item').trim();
     const qty = item.quantity || 1;
     const price = parseFloat(item.price || 0);
     const itemTotal = (price * qty).toFixed(2);
 
-    if (isKOT) {
-      lines.push(justifyLine(name, `x${qty}`, width));
-      const note = item.notes || item.specialNote;
-      if (note) {
-        lines.push(` * Note: ${note}`);
-      }
+    if (width === 42) {
+      const colName = name.slice(0, 21).padEnd(21);
+      const colQty = String(qty).padStart(4);
+      const colRate = price.toFixed(2).padStart(8);
+      const colTotal = itemTotal.padStart(9);
+      lines.push(`${colName} ${colQty} ${colRate} ${colTotal}`);
     } else {
-      if (width === 48) {
-        const nameCol = name.padEnd(32).substring(0, 32);
-        const qtyCol = `${qty}`.padStart(4);
-        const amtCol = `₹${itemTotal}`.padStart(10);
-        lines.push(`${nameCol} ${qtyCol} ${amtCol}`);
-      } else {
-        const left = name.substring(0, 18);
-        const right = `${qty} ₹${itemTotal}`;
-        lines.push(justifyLine(left, right, width));
-      }
+      // 30 column layout: 16 chars Item + 4 chars Qty + 10 chars Amount
+      const colName = name.slice(0, 16).padEnd(16);
+      const colQty = String(qty).padStart(4);
+      const colTotal = itemTotal.padStart(10);
+      lines.push(`${colName}${colQty}${colTotal}`);
     }
   }
   lines.push(thinDivider);
 
-  // Financials (Only on Bill, NOT on KOT)
-  if (!isKOT) {
-    const subtotal = parseFloat(order.subtotal || order.total || order.grandTotal || 0);
-    const tax = parseFloat(
-      order.tax !== undefined
-        ? order.tax
-        : (order.cgst || order.sgst)
-        ? (parseFloat(order.cgst || 0) + parseFloat(order.sgst || 0))
-        : 0
-    );
-    const discount = parseFloat(order.discount || 0);
-    const grandTotal = parseFloat(order.grandTotal || order.total || (subtotal + tax - discount));
+  // Financials & Summary
+  const subtotal = parseFloat(order.subtotal || order.total || order.grandTotal || 0);
+  const cgst = parseFloat(order.cgst || (order.tax ? order.tax / 2 : 0));
+  const sgst = parseFloat(order.sgst || (order.tax ? order.tax / 2 : 0));
+  const discount = parseFloat(order.discount || 0);
+  const grandTotal = parseFloat(order.grandTotal || order.total || (subtotal + cgst + sgst - discount));
 
-    if (discount > 0) {
-      lines.push(justifyLine('Discount:', `-₹${discount.toFixed(2)}`, width));
-    }
-    if (tax > 0) {
-      lines.push(justifyLine('GST / Taxes (5%):', `₹${tax.toFixed(2)}`, width));
-    }
-    lines.push(divider);
-    lines.push(justifyLine('NET AMOUNT:', `Rs. ${grandTotal.toFixed(2)}`, width));
-    lines.push(divider);
-    lines.push(justifyLine('Payment Status:', `PAID (${payMethod})`, width));
-    lines.push(thinDivider);
-  } else {
-    const chefNote = order.specialNote || order.notes;
-    if (chefNote) {
-      lines.push(`Special Chef Instructions:`);
-      lines.push(`${chefNote}`);
-      lines.push(thinDivider);
-    }
-    lines.push(centerText('-- Expedite Kitchen Order --', width));
+  lines.push(justifyLine('Sub Total:', subtotal.toFixed(2), width));
+  if (discount > 0) {
+    lines.push(justifyLine('Discount:', `-${discount.toFixed(2)}`, width));
   }
+  if (cgst > 0) {
+    lines.push(justifyLine('CGST (2.5%):', cgst.toFixed(2), width));
+  }
+  if (sgst > 0) {
+    lines.push(justifyLine('SGST (2.5%):', sgst.toFixed(2), width));
+  }
+  lines.push(divider);
+  lines.push(justifyLine('TOTAL AMOUNT:', `Rs. ${grandTotal.toFixed(2)}`, width));
+  lines.push(divider);
+  lines.push(justifyLine(`Payment: ${payMethod}`, 'Status: PAID', width));
+  lines.push(thinDivider);
 
   // Footer
-  lines.push('');
-  if (!isKOT && footerMsg) {
+  if (footerMsg) {
     lines.push(centerText(footerMsg, width));
   }
   lines.push(centerText('Powered by Ezydine POS', width));
-  lines.push('\n\n\n\n'); // Feed lines so it rolls out cleanly for tearing
+  lines.push('\n\n'); // Feed 2 lines so paper rolls cleanly past cutter
 
   return lines.join('\n');
+}
+
+// Helper: Build Native ESC/POS Binary Buffer for Professional Thermal Printing
+function buildEscPosBuffer(data: {
+  type: 'bill' | 'kot' | 'test';
+  order?: any;
+  template?: any;
+  width?: '58mm' | '80mm';
+}): Buffer {
+  const chunks: Buffer[] = [];
+
+  // ESC/POS Command Constants
+  const ESC = 0x1b;
+  const GS = 0x1d;
+
+  const CMD_INIT = Buffer.from([ESC, 0x40]); // Initialize
+  const CMD_ALIGN_CENTER = Buffer.from([ESC, 0x61, 0x01]); // Align Center
+  const CMD_ALIGN_LEFT = Buffer.from([ESC, 0x61, 0x00]); // Align Left
+  const CMD_ALIGN_RIGHT = Buffer.from([ESC, 0x61, 0x02]); // Align Right
+  const CMD_BOLD_ON = Buffer.from([ESC, 0x45, 0x01]); // Bold ON
+  const CMD_BOLD_OFF = Buffer.from([ESC, 0x45, 0x00]); // Bold OFF
+  const CMD_DOUBLE_SIZE = Buffer.from([GS, 0x21, 0x11]); // 2x Width & 2x Height
+  const CMD_NORMAL_SIZE = Buffer.from([GS, 0x21, 0x00]); // Normal Size
+  const CMD_FEED_CUT = Buffer.from([ESC, 0x64, 0x02, GS, 0x56, 0x00]); // Feed 2 lines & Full Cut
+
+  chunks.push(CMD_INIT);
+
+  const cleanText = formatReceiptText(data);
+  const textBuffer = Buffer.from(cleanText, 'ascii');
+  chunks.push(textBuffer);
+  chunks.push(CMD_FEED_CUT);
+
+  return Buffer.concat(chunks);
 }
 
 // 2. POST Direct Hardware Print
@@ -249,17 +321,15 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const { printerName, type = 'bill', order, template, width = '58mm' } = req.body;
 
-    // Check available printers
+    // Discover system printers
     const printersOutput = await runCmd('lpstat -p -d');
     let targetPrinter = printerName;
 
-    if (!targetPrinter || targetPrinter === 'Auto-Detect' || targetPrinter === 'Default POS Printer') {
-      // Pick system default
+    if (!targetPrinter || targetPrinter.includes('Default') || targetPrinter === 'Auto-Detect') {
       const defaultMatch = printersOutput.match(/system default destination:\s*([^\n\r]+)/);
       if (defaultMatch && defaultMatch[1]) {
         targetPrinter = defaultMatch[1].trim();
       } else {
-        // Find first printer
         const firstPrinterMatch = printersOutput.match(/printer\s+([^\s]+)/);
         if (firstPrinterMatch && firstPrinterMatch[1]) {
           targetPrinter = firstPrinterMatch[1].trim();
@@ -274,25 +344,44 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
-    // Format receipt text
-    const receiptContent = formatReceiptText({
+    // Determine width setting (Auto-detect 80mm from printer name if not provided)
+    const effectiveWidth: '58mm' | '80mm' =
+      width === '80mm' || targetPrinter.toLowerCase().includes('80') ? '80mm' : '58mm';
+
+    // Generate high quality ESC/POS binary data
+    const escposBuffer = buildEscPosBuffer({
       type,
       order,
       template,
-      width,
+      width: effectiveWidth,
     });
 
-    // Write to a temporary file in OS tmp directory
-    const tmpFilePath = path.join(os.tmpdir(), `ezydine_print_${Date.now()}.txt`);
-    fs.writeFileSync(tmpFilePath, receiptContent, 'utf-8');
+    const tmpFilePath = path.join(os.tmpdir(), `ezydine_escpos_${Date.now()}.bin`);
+    fs.writeFileSync(tmpFilePath, escposBuffer);
 
-    // Send to CUPS printer using lp
-    // -d <printer> : specify destination
-    // -o raw : pass raw text stream without PDF/postscript raster overhead
-    const lpCommand = `lp -d "${targetPrinter}" "${tmpFilePath}"`;
-    const lpResult = await runCmd(lpCommand);
+    // Send using lp with -o raw (Raw binary stream to thermal printer)
+    let lpCommand = `lp -d "${targetPrinter}" -o raw "${tmpFilePath}"`;
+    let lpResult = '';
+    try {
+      lpResult = await runCmd(lpCommand);
+    } catch (rawError: any) {
+      console.warn('Raw lp failed, retrying standard text mode:', rawError.message);
+      // Fallback: Send plain formatted ASCII text without -o raw
+      const plainText = formatReceiptText({
+        type,
+        order,
+        template,
+        width: effectiveWidth,
+      });
+      const txtPath = path.join(os.tmpdir(), `ezydine_text_${Date.now()}.txt`);
+      fs.writeFileSync(txtPath, plainText, 'ascii');
+      lpResult = await runCmd(`lp -d "${targetPrinter}" "${txtPath}"`);
+      setTimeout(() => {
+        try { if (fs.existsSync(txtPath)) fs.unlinkSync(txtPath); } catch {}
+      }, 2000);
+    }
 
-    // Clean up temporary file after a short delay
+    // Cleanup temporary binary file
     setTimeout(() => {
       try {
         if (fs.existsSync(tmpFilePath)) fs.unlinkSync(tmpFilePath);
@@ -304,7 +393,8 @@ router.post('/', async (req: Request, res: Response) => {
     return res.json({
       success: true,
       printer: targetPrinter,
-      message: `Print dispatched directly to ${targetPrinter}`,
+      width: effectiveWidth,
+      message: `Print dispatched cleanly to ${targetPrinter}`,
       lpOutput: lpResult,
     });
   } catch (error: any) {
