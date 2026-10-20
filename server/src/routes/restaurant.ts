@@ -72,10 +72,10 @@ router.put('/profile', requireAuth, async (req: AuthRequest, res: Response) => {
           location = COALESCE($2, location),
           phone = COALESCE($3, phone),
           gst_number = COALESCE($4, gst_number),
-          gst_rate = CASE WHEN $5 IS NOT NULL THEN $5::numeric ELSE gst_rate END,
+          gst_rate = CASE WHEN ($5::numeric) IS NOT NULL THEN ($5::numeric) ELSE gst_rate END,
           thermal_paper_width = COALESCE($6, thermal_paper_width),
-          kot_enabled = CASE WHEN $7 IS NOT NULL THEN $7::boolean ELSE kot_enabled END,
-          logo_url = CASE WHEN $8 IS NOT NULL THEN $8 ELSE logo_url END,
+          kot_enabled = CASE WHEN ($7::boolean) IS NOT NULL THEN ($7::boolean) ELSE kot_enabled END,
+          logo_url = CASE WHEN ($8::text) IS NOT NULL THEN ($8::text) ELSE logo_url END,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $9
       RETURNING id, name, location, phone, gst_number as "gstNumber",
