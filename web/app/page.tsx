@@ -128,6 +128,42 @@ export interface RealPrinterDevice {
   productId?: number | string;
 }
 
+const getApiBaseUrl = () => {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://localhost:5001/api';
+    }
+    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(window.location.hostname)) {
+      return `http://${window.location.hostname}:5001/api`;
+    }
+  }
+  return 'https://api.ezydine.in/api';
+};
+
+const apiFetch = async (endpoint: string, options: RequestInit = {}): Promise<Response> => {
+  const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const base = getApiBaseUrl();
+  const primaryUrl = `${base}${path}`;
+
+  try {
+    const res = await fetch(primaryUrl, options);
+    return res;
+  } catch (err) {
+    if (!primaryUrl.includes('localhost:5001') && !primaryUrl.includes('127.0.0.1:5001')) {
+      try {
+        console.warn(`[API] Failed to reach ${primaryUrl}, falling back to local backend http://localhost:5001/api${path}`);
+        return await fetch(`http://localhost:5001/api${path}`, options);
+      } catch {
+        // preserve original error
+      }
+    }
+    throw err;
+  }
+};
+
 const DEFAULT_FLOOR_TABLES: Table[] = [
   { id: 't1', number: '01', capacity: 2, section: 'Dine-In', status: 'available' },
   { id: 't2', number: '02', capacity: 4, section: 'Dine-In', status: 'available' },
@@ -492,7 +528,7 @@ export default function ManagerOrderPortal() {
   const fetchRestaurantMenu = async (token: string) => {
     setIsMenuLoading(true);
     try {
-      const res = await fetch('https://api.ezydine.in/api/menu', {
+      const res = await apiFetch('/menu', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -525,7 +561,7 @@ export default function ManagerOrderPortal() {
     setIsLoggingIn(true);
 
     try {
-      const res = await fetch('https://api.ezydine.in/api/auth/manager-login', {
+      const res = await apiFetch('/auth/manager-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identifier: loginIdentifier.trim(), pin: loginPin.trim() }),
@@ -806,7 +842,7 @@ export default function ManagerOrderPortal() {
   // Auto-discover and connect real CUPS / OS hardware thermal printers
   const loadSystemPrinters = async () => {
     try {
-      const res = await fetch('https://api.ezydine.in/api/print/printers');
+      const res = await apiFetch('/print/printers');
       const data = await res.json();
       if (data.success && Array.isArray(data.printers) && data.printers.length > 0) {
         const discoveredPrinters: RealPrinterDevice[] = data.printers.map((p: any) => ({
@@ -1043,7 +1079,7 @@ export default function ManagerOrderPortal() {
     // Optionally sync to backend
     if (managerSession) {
       try {
-        fetch('https://api.ezydine.in/api/bills', {
+        apiFetch('/bills', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1163,7 +1199,7 @@ export default function ManagerOrderPortal() {
         return;
       }
 
-      const res = await fetch('https://api.ezydine.in/api/print', {
+      const res = await apiFetch('/print', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1203,7 +1239,7 @@ export default function ManagerOrderPortal() {
     playReceiptChime();
     setPrintStatusMessage(`Sending test slip to ${activePrinter.name}...`);
     try {
-      const res = await fetch('https://api.ezydine.in/api/print', {
+      const res = await apiFetch('/print', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1227,7 +1263,7 @@ export default function ManagerOrderPortal() {
   // Master Admin API Handlers
   const loadMasterOtps = async () => {
     try {
-      const res = await fetch('https://api.ezydine.in/api/master/otps');
+      const res = await apiFetch('/master/otps');
       const data = await res.json();
       if (data.success && data.otps) {
         setMasterOtps(data.otps);
@@ -1240,7 +1276,7 @@ export default function ManagerOrderPortal() {
   const loadMasterAppLogins = async () => {
     setIsMasterLoading(true);
     try {
-      const res = await fetch('https://api.ezydine.in/api/master/app-logins');
+      const res = await apiFetch('/master/app-logins');
       const data = await res.json();
       if (data.success && data.logins) {
         setMasterAppLogins(data.logins);
@@ -1270,7 +1306,7 @@ export default function ManagerOrderPortal() {
 
     setIsCreatingLogin(true);
     try {
-      const res = await fetch('https://api.ezydine.in/api/master/create-app-login', {
+      const res = await apiFetch('/master/create-app-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1306,7 +1342,7 @@ export default function ManagerOrderPortal() {
   const handleDeleteAppLogin = async (userId: number, name: string) => {
     if (!confirm(`Are you sure you want to remove app login for ${name}?`)) return;
     try {
-      const res = await fetch(`https://api.ezydine.in/api/master/app-logins/${userId}`, {
+      const res = await apiFetch(`/master/app-logins/${userId}`, {
         method: 'DELETE',
       });
       const data = await res.json();
@@ -1359,7 +1395,7 @@ export default function ManagerOrderPortal() {
     }
     const isVeg = confirm(`Is "${dishName.trim()}" Vegetarian?\nClick OK for Pure Veg, Cancel for Non-Veg.`);
     try {
-      const res = await fetch('https://api.ezydine.in/api/menu', {
+      const res = await apiFetch('/menu', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

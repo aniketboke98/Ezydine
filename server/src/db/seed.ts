@@ -195,6 +195,81 @@ export async function seedDatabase() {
     },
   });
   console.log('✅ Seeded standard subscription plans.');
+
+  // 4. Seed Demo Restaurant & Manager for Out-of-the-Box Login
+  const demoOwner = await prisma.user.upsert({
+    where: { phone: '9876543210' },
+    update: {},
+    create: {
+      fullName: 'EzyDine Demo Owner',
+      phone: '9876543210',
+      email: 'owner@ezydine.in',
+      role: 'owner',
+    },
+  });
+
+  let demoRestaurant = await prisma.restaurantProfile.findFirst({
+    where: { userId: demoOwner.id },
+  });
+
+  if (!demoRestaurant) {
+    demoRestaurant = await prisma.restaurantProfile.create({
+      data: {
+        userId: demoOwner.id,
+        name: 'EzyDine Demo Bistro',
+        location: 'Indiranagar, Bengaluru',
+        phone: '9876543210',
+        gstNumber: '29AABCT1332L1Z4',
+        gstRate: 5.0,
+        thermalPaperWidth: '58mm',
+        kotEnabled: true,
+      },
+    });
+  }
+
+  // Link Owner Role to Demo Owner
+  const ownerRole = await prisma.role.findFirst({ where: { name: 'Owner', isSystem: true } });
+  if (ownerRole) {
+    const existing = await prisma.userRole.findFirst({
+      where: { userId: demoOwner.id, roleId: ownerRole.id, restaurantId: demoRestaurant.id },
+    });
+    if (!existing) {
+      await prisma.userRole.create({
+        data: { userId: demoOwner.id, roleId: ownerRole.id, restaurantId: demoRestaurant.id },
+      });
+    }
+  }
+
+  // Find Manager Role
+  const managerRole = await prisma.role.findFirst({ where: { name: 'Manager', isSystem: true } });
+
+  // Seed Demo Manager Staff
+  await prisma.staffMember.upsert({
+    where: {
+      restaurantId_phone: {
+        restaurantId: demoRestaurant.id,
+        phone: '9800000001',
+      },
+    },
+    update: {
+      restaurantId: demoRestaurant.id,
+      roleId: managerRole?.id || null,
+      pin: '1234',
+      role: 'Manager',
+      isActive: true,
+    },
+    create: {
+      restaurantId: demoRestaurant.id,
+      name: 'Alex Demo Manager',
+      phone: '9800000001',
+      role: 'Manager',
+      roleId: managerRole?.id || null,
+      pin: '1234',
+      isActive: true,
+    },
+  });
+
+  console.log('✅ Seeded Demo Manager: Phone 9800000001 | PIN 1234');
   console.log('🎉 Database seeding complete!');
 }
 
