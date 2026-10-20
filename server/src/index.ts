@@ -14,7 +14,8 @@ import staffRoutes from './routes/staff';
 import masterRoutes from './routes/master';
 import printRoutes from './routes/print';
 
-dotenv.config();
+// Load .env and override any existing env vars (e.g., a globally set PORT)
+dotenv.config({ override: true });
 
 const app = express();
 const PORT = process.env.PORT || 5001;
