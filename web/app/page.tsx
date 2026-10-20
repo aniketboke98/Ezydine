@@ -39,6 +39,9 @@ import {
   Sliders,
   FileText,
   Sparkles,
+  Key,
+  Smartphone,
+  UserPlus,
 } from 'lucide-react';
 
 interface MenuItem {
@@ -140,8 +143,27 @@ const DEFAULT_FLOOR_TABLES: Table[] = [
 ];
 
 export default function ManagerOrderPortal() {
-  // Navigation & View Mode: 'pos' (floor billing) or 'history' (order history & reprint)
-  const [currentView, setCurrentView] = useState<'pos' | 'history'>('pos');
+  // Navigation & View Mode: 'pos' (floor billing) | 'history' (order history & reprint) | 'master' (App Logins & OTPs)
+  const [currentView, setCurrentView] = useState<'pos' | 'history' | 'master'>('pos');
+
+  // Master Admin State (Creating App Login & Live App Requested OTPs)
+  const [masterSubTab, setMasterSubTab] = useState<'otps' | 'create_login' | 'logins'>('otps');
+  const [masterOtps, setMasterOtps] = useState<any[]>([]);
+  const [masterAppLogins, setMasterAppLogins] = useState<any[]>([]);
+  const [isMasterLoading, setIsMasterLoading] = useState(false);
+  const [masterOtpCopied, setMasterOtpCopied] = useState<string | null>(null);
+  const [createLoginPhone, setCreateLoginPhone] = useState('');
+  const [createLoginName, setCreateLoginName] = useState('');
+  const [createLoginRestName, setCreateLoginRestName] = useState('');
+  const [createLoginLocation, setCreateLoginLocation] = useState('');
+  const [createLoginPin, setCreateLoginPin] = useState('1234');
+  const [createLoginPlan, setCreateLoginPlan] = useState('plan_starter_3000');
+  const [isCreatingLogin, setIsCreatingLogin] = useState(false);
+  const [createLoginError, setCreateLoginError] = useState('');
+  const [createdLoginSuccess, setCreatedLoginSuccess] = useState<any | null>(null);
+
+  // Direct Hardware Print State (No Browser System Dialog Pop-up)
+  const [isDirectPrinting, setIsDirectPrinting] = useState(false);
 
   // Authentication State
   const [managerSession, setManagerSession] = useState<ManagerSession | null>(null);
@@ -339,6 +361,7 @@ export default function ManagerOrderPortal() {
           // ignore
         }
       }
+      loadSystemPrinters();
     } catch {
       // fallback
     } finally {
@@ -349,6 +372,13 @@ export default function ManagerOrderPortal() {
       }, 50);
     }
   }, []);
+
+  // Refresh hardware printers when modal is opened
+  useEffect(() => {
+    if (isPrinterModalOpen) {
+      loadSystemPrinters();
+    }
+  }, [isPrinterModalOpen]);
 
   // Synchronize cart & draft when selectedTable changes
   const handleSelectTable = (table: Table) => {
@@ -773,6 +803,44 @@ export default function ManagerOrderPortal() {
     );
   };
 
+  // Auto-discover and connect real CUPS / OS hardware thermal printers
+  const loadSystemPrinters = async () => {
+    try {
+      const res = await fetch('http://localhost:5001/api/print/printers');
+      const data = await res.json();
+      if (data.success && Array.isArray(data.printers) && data.printers.length > 0) {
+        const discoveredPrinters: RealPrinterDevice[] = data.printers.map((p: any) => ({
+          id: `sys_${p.name}`,
+          name: p.name,
+          connectionType: 'system',
+          paperWidth: p.name.toLowerCase().includes('80') ? '80mm' : '58mm',
+          status: p.status === 'idle' ? 'connected' : 'disconnected',
+        }));
+
+        setPairedPrinters(discoveredPrinters);
+        localStorage.setItem('ezydine_real_printers', JSON.stringify(discoveredPrinters));
+
+        // Auto-select system default printer if active printer is generic placeholder
+        const defaultSys = data.printers.find((p: any) => p.isDefault) || data.printers[0];
+        setActivePrinter((prev) => {
+          const match = discoveredPrinters.find((dp) => dp.name === prev.name);
+          if (match) return match;
+          const defaultDev: RealPrinterDevice = {
+            id: `sys_${defaultSys.name}`,
+            name: defaultSys.name,
+            connectionType: 'system',
+            paperWidth: defaultSys.name.toLowerCase().includes('80') ? '80mm' : '58mm',
+            status: 'connected',
+          };
+          localStorage.setItem('ezydine_active_printer', JSON.stringify(defaultDev));
+          return defaultDev;
+        });
+      }
+    } catch (err) {
+      console.warn('System printers query error:', err);
+    }
+  };
+
   // Cart operations
   const addToCart = (item: MenuItem) => {
     setCart((prev) => {
@@ -1062,6 +1130,207 @@ export default function ManagerOrderPortal() {
     setTimeout(() => setCopiedSlip(false), 2000);
   };
 
+  // Play soft thermal receipt chime
+  const playReceiptChime = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1320, audioCtx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.1);
+    } catch {
+      // Audio fallback
+    }
+  };
+
+  // TRUE DIRECT PRINTING TO PHYSICAL HARDWARE (Zero Browser Pop-up / Dialog)
+  const handleDirectHardwarePrint = async () => {
+    setIsDirectPrinting(true);
+    playReceiptChime();
+
+    try {
+      const currentOrder = generatedPrintData?.order;
+      if (!currentOrder) {
+        setPrintStatusMessage('⚠️ No active order data to print.');
+        setIsDirectPrinting(false);
+        return;
+      }
+
+      const res = await fetch('http://localhost:5001/api/print', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          printerName: activePrinter.name,
+          type: generatedPrintData.mode,
+          width: activePrinter.paperWidth || '58mm',
+          order: currentOrder,
+          template: {
+            storeName: managerSession?.restaurantName || 'EZYDINE RESTOBAR',
+            phone: managerSession?.phone || '9876543210',
+            address: managerSession?.restaurantAddress || 'Bengaluru, India',
+            gstNo: managerSession?.gstNo || '',
+            footerMsg: ownerTemplate.footerText,
+          },
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setPrintStatusMessage(`✓ Printed directly to ${data.printer || activePrinter.name}`);
+      } else {
+        setPrintStatusMessage(`⚠️ Print error: ${data.error || 'Failed to dispatch to hardware'}`);
+      }
+    } catch (err: any) {
+      console.error('Error dispatching direct print:', err);
+      setPrintStatusMessage(`⚠️ Print error: ${err.message || 'Cannot reach local print service'}`);
+    } finally {
+      setIsDirectPrinting(false);
+      setTimeout(() => {
+        setIsGeneratePrintOpen(false);
+        setPrintStatusMessage(null);
+      }, 1500);
+    }
+  };
+
+  const handleDirectTestPrint = async () => {
+    playReceiptChime();
+    setPrintStatusMessage(`Sending test slip to ${activePrinter.name}...`);
+    try {
+      const res = await fetch('http://localhost:5001/api/print', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          printerName: activePrinter.name,
+          type: 'test',
+          width: activePrinter.paperWidth || '58mm',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPrintStatusMessage(`✓ Test slip printed directly on ${data.printer || activePrinter.name}`);
+      } else {
+        setPrintStatusMessage(`⚠️ Test failed: ${data.error || 'Could not print'}`);
+      }
+    } catch (err: any) {
+      setPrintStatusMessage(`⚠️ Error: ${err.message}`);
+    }
+    setTimeout(() => setPrintStatusMessage(null), 3500);
+  };
+
+  // Master Admin API Handlers
+  const loadMasterOtps = async () => {
+    try {
+      const res = await fetch('http://localhost:5001/api/master/otps');
+      const data = await res.json();
+      if (data.success && data.otps) {
+        setMasterOtps(data.otps);
+      }
+    } catch (err) {
+      console.warn('Error loading master OTPs:', err);
+    }
+  };
+
+  const loadMasterAppLogins = async () => {
+    setIsMasterLoading(true);
+    try {
+      const res = await fetch('http://localhost:5001/api/master/app-logins');
+      const data = await res.json();
+      if (data.success && data.logins) {
+        setMasterAppLogins(data.logins);
+      }
+    } catch (err) {
+      console.warn('Error loading master app logins:', err);
+    } finally {
+      setIsMasterLoading(false);
+    }
+  };
+
+  const handleCreateAppLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateLoginError('');
+    if (!createLoginPhone || createLoginPhone.trim().length < 10) {
+      setCreateLoginError('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+    if (!createLoginName.trim()) {
+      setCreateLoginError('Please enter Owner / Manager Full Name.');
+      return;
+    }
+    if (!createLoginRestName.trim()) {
+      setCreateLoginError('Please enter Restaurant / Business Name.');
+      return;
+    }
+
+    setIsCreatingLogin(true);
+    try {
+      const res = await fetch('http://localhost:5001/api/master/create-app-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: createLoginPhone.trim(),
+          fullName: createLoginName.trim(),
+          restaurantName: createLoginRestName.trim(),
+          location: createLoginLocation.trim() || 'Bengaluru',
+          pin: createLoginPin.trim() || '1234',
+          planId: createLoginPlan,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success && data.appLogin) {
+        setCreatedLoginSuccess(data.appLogin);
+        setCreateLoginPhone('');
+        setCreateLoginName('');
+        setCreateLoginRestName('');
+        setCreateLoginLocation('');
+        setCreateLoginPin('1234');
+        loadMasterAppLogins();
+        loadMasterOtps();
+      } else {
+        setCreateLoginError(data.error || 'Failed to create app login.');
+      }
+    } catch (err: any) {
+      setCreateLoginError(err.message || 'Failed to create app login.');
+    } finally {
+      setIsCreatingLogin(false);
+    }
+  };
+
+  const handleDeleteAppLogin = async (userId: number, name: string) => {
+    if (!confirm(`Are you sure you want to remove app login for ${name}?`)) return;
+    try {
+      const res = await fetch(`http://localhost:5001/api/master/app-logins/${userId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPrintStatusMessage(`App login removed.`);
+        loadMasterAppLogins();
+      }
+    } catch (err) {
+      console.warn('Error deleting login:', err);
+    }
+  };
+
+  // Poll Master data periodically when in Master view
+  useEffect(() => {
+    if (currentView === 'master') {
+      loadMasterOtps();
+      loadMasterAppLogins();
+      const interval = setInterval(() => {
+        loadMasterOtps();
+      }, 4000);
+      return () => clearInterval(interval);
+    }
+  }, [currentView]);
+
   // Update Payment Method for an existing order in Order History (Cash / UPI / Card)
   const handleUpdateOrderPaymentMethod = (orderId: string, newMethod: 'Cash' | 'UPI' | 'Card') => {
     const updated = orderHistory.map((order) => {
@@ -1331,6 +1600,27 @@ export default function ManagerOrderPortal() {
                   {orderHistory.length}
                 </span>
               </button>
+
+              <button
+                onClick={() => {
+                  setCurrentView('master');
+                  loadMasterOtps();
+                  loadMasterAppLogins();
+                }}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  currentView === 'master'
+                    ? 'bg-white text-[#0B1B29] shadow-xs'
+                    : 'text-[#64748B] hover:text-[#0B1B29]'
+                }`}
+              >
+                <Key className="w-4 h-4 text-[#D97706]" />
+                <span>Master Admin</span>
+                {masterOtps.filter((o) => o.status === 'ACTIVE').length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-[#FEF3C7] text-[#D97706] font-extrabold animate-pulse">
+                    {masterOtps.filter((o) => o.status === 'ACTIVE').length} OTP
+                  </span>
+                )}
+              </button>
             </div>
           </div>
 
@@ -1395,7 +1685,7 @@ export default function ManagerOrderPortal() {
               currentView === 'pos' ? 'bg-[#0B1B29] text-white' : 'text-[#64748B]'
             }`}
           >
-            Floor Tables ({occupiedTablesList.length} Active)
+            Floor Tables ({occupiedTablesList.length})
           </button>
           <button
             onClick={() => setCurrentView('history')}
@@ -1403,13 +1693,25 @@ export default function ManagerOrderPortal() {
               currentView === 'history' ? 'bg-[#0B1B29] text-white' : 'text-[#64748B]'
             }`}
           >
-            Order History & Reprints ({orderHistory.length})
+            History ({orderHistory.length})
+          </button>
+          <button
+            onClick={() => {
+              setCurrentView('master');
+              loadMasterOtps();
+              loadMasterAppLogins();
+            }}
+            className={`flex-1 py-2 rounded-lg text-xs font-bold text-center ${
+              currentView === 'master' ? 'bg-[#0B1B29] text-white' : 'text-[#64748B]'
+            }`}
+          >
+            Master Admin
           </button>
         </div>
       </header>
 
       {/* VIEW 1: POS FLOOR PLAN & BILLING */}
-      {currentView === 'pos' ? (
+      {currentView === 'pos' && (
         <div className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col lg:flex-row gap-6">
           {/* Left Column: Tables & Menu Catalog (2/3 width) */}
           <div className="flex-1 flex flex-col gap-6">
@@ -1837,8 +2139,10 @@ export default function ManagerOrderPortal() {
             </div>
           </div>
         </div>
-      ) : (
-        /* VIEW 2: ORDER HISTORY & REPRINT OPTIONS (Shown to Manager Once Print is Done) */
+      )}
+
+      {/* VIEW 2: ORDER HISTORY & REPRINT OPTIONS (Shown to Manager Once Print is Done) */}
+      {currentView === 'history' && (
         <div className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-6">
           {/* Top Banner & Quick Return to Floor */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-[#E2E8F0] shadow-xs">
@@ -2144,6 +2448,631 @@ export default function ManagerOrderPortal() {
         </div>
       )}
 
+      {/* Master Admin Panel: Create App Login & Live App Requested OTPs */}
+      {currentView === 'master' && (
+        <div className="max-w-7xl mx-auto px-4 py-8">
+          {/* Top Hero Card */}
+          <div className="bg-[#0B1B29] text-white rounded-3xl p-6 sm:p-8 mb-8 relative overflow-hidden shadow-xl border border-white/10">
+            <div className="absolute -right-20 -top-20 w-80 h-80 rounded-full bg-[#D92F43]/20 blur-3xl pointer-events-none" />
+            <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+              <div>
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold uppercase tracking-wider mb-3">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  Master Terminal Control & Live OTP
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+                  Restaurant App Provisioning & OTP Feed
+                </h1>
+                <p className="text-sm text-slate-300 mt-2 max-w-2xl leading-relaxed">
+                  Provision new restaurant accounts for mobile app access, retrieve real-time OTP verification codes, and manage active tenant devices.
+                </p>
+              </div>
+
+              {/* Master Universal OTP Quick Card */}
+              <div className="bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/15 shrink-0 min-w-[280px]">
+                <div className="text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Key className="w-3.5 h-3.5 text-amber-400" />
+                    Universal Master OTP
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-black">
+                    ALWAYS ACTIVE
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-3 mt-2">
+                  <span className="font-mono text-2xl font-black text-white tracking-widest bg-black/40 px-3 py-1.5 rounded-xl border border-white/10">
+                    123456
+                  </span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText('123456');
+                      setMasterOtpCopied('123456');
+                      setTimeout(() => setMasterOtpCopied(null), 2000);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white transition-all text-xs font-bold"
+                    title="Copy Universal OTP"
+                  >
+                    {masterOtpCopied === '123456' ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-400" />
+                        <span className="text-emerald-300">Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        <span>Copy</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-2">Bypasses SMS on any mobile login for instant testing</p>
+              </div>
+            </div>
+
+            {/* Quick Metrics */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-8 pt-6 border-t border-white/10">
+              <div className="flex items-center gap-4 bg-white/5 rounded-2xl p-4 border border-white/5">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                  <Smartphone className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="text-2xl font-black text-white">
+                    {masterOtps.filter((o) => o.status === 'ACTIVE').length}
+                  </div>
+                  <div className="text-xs text-slate-400 font-medium">Active OTPs (Live Feed)</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 bg-white/5 rounded-2xl p-4 border border-white/5">
+                <div className="w-12 h-12 rounded-xl bg-[#D92F43]/20 text-[#D92F43] flex items-center justify-center shrink-0">
+                  <UserPlus className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="text-2xl font-black text-white">{masterAppLogins.length}</div>
+                  <div className="text-xs text-slate-400 font-medium">Registered App Accounts</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 bg-white/5 rounded-2xl p-4 border border-white/5">
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                  <HardDrive className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="text-2xl font-black text-white">
+                    {masterAppLogins.reduce((acc, curr) => acc + (parseInt(curr.activeDevices, 10) || 1), 0)}
+                  </div>
+                  <div className="text-xs text-slate-400 font-medium">Connected Terminals</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Sub Navigation Bar */}
+          <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
+            <div className="flex items-center gap-2 p-1 bg-white border border-[#E2E8F0] rounded-2xl shadow-xs">
+              <button
+                onClick={() => setMasterSubTab('otps')}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                  masterSubTab === 'otps'
+                    ? 'bg-[#0B1B29] text-white shadow-xs'
+                    : 'text-[#64748B] hover:text-[#0B1B29] hover:bg-[#F8FAFC]'
+                }`}
+              >
+                <Smartphone className="w-4 h-4" />
+                <span>Live App Requested OTPs</span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                    masterSubTab === 'otps' ? 'bg-amber-400 text-black' : 'bg-amber-100 text-amber-800'
+                  }`}
+                >
+                  {masterOtps.filter((o) => o.status === 'ACTIVE').length} Active
+                </span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setMasterSubTab('create_login');
+                  setCreatedLoginSuccess(null);
+                }}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                  masterSubTab === 'create_login'
+                    ? 'bg-[#0B1B29] text-white shadow-xs'
+                    : 'text-[#64748B] hover:text-[#0B1B29] hover:bg-[#F8FAFC]'
+                }`}
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Create App Login</span>
+              </button>
+
+              <button
+                onClick={() => setMasterSubTab('logins')}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                  masterSubTab === 'logins'
+                    ? 'bg-[#0B1B29] text-white shadow-xs'
+                    : 'text-[#64748B] hover:text-[#0B1B29] hover:bg-[#F8FAFC]'
+                }`}
+              >
+                <HardDrive className="w-4 h-4" />
+                <span>Registered App Accounts ({masterAppLogins.length})</span>
+              </button>
+            </div>
+
+            <button
+              onClick={() => {
+                loadMasterOtps();
+                loadMasterAppLogins();
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 bg-white border border-[#E2E8F0] hover:bg-[#F8FAFC] text-[#0B1B29] rounded-xl text-xs font-bold shadow-xs transition-all"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isMasterLoading ? 'animate-spin' : ''}`} />
+              <span>Refresh Feed</span>
+            </button>
+          </div>
+
+          {/* TAB 1: Live Requested OTPs */}
+          {masterSubTab === 'otps' && (
+            <div className="bg-white rounded-3xl border border-[#E2E8F0] shadow-xs overflow-hidden">
+              <div className="p-6 border-b border-[#F1F5F9] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#F8FAFC]">
+                <div>
+                  <h3 className="font-black text-lg text-[#0B1B29] flex items-center gap-2">
+                    <Smartphone className="w-5 h-5 text-[#D92F43]" />
+                    Real-time App OTP Verification Feed
+                  </h3>
+                  <p className="text-xs text-[#64748B] mt-0.5">
+                    Every OTP requested on the Ezydine Mobile App appears here instantly. Click any OTP to copy.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl self-start sm:self-auto">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                  Auto-syncing every 4s
+                </div>
+              </div>
+
+              {masterOtps.length === 0 ? (
+                <div className="py-16 text-center">
+                  <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center mx-auto mb-4">
+                    <Smartphone className="w-8 h-8" />
+                  </div>
+                  <h4 className="font-bold text-base text-[#0B1B29]">No App OTP Requests Yet</h4>
+                  <p className="text-xs text-[#64748B] max-w-md mx-auto mt-1">
+                    When someone requests a login OTP in the mobile app, it will display here with 1-click copy.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#F1F5F9] text-[11px] font-bold text-[#64748B] uppercase tracking-wider bg-white">
+                        <th className="py-3.5 px-6">Mobile Number</th>
+                        <th className="py-3.5 px-6">OTP Code</th>
+                        <th className="py-3.5 px-6">Status</th>
+                        <th className="py-3.5 px-6">Requested Time</th>
+                        <th className="py-3.5 px-6 text-right">Quick Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#F1F5F9]">
+                      {masterOtps.map((otp) => {
+                        const isCopied = masterOtpCopied === otp.otpCode;
+                        return (
+                          <tr
+                            key={otp.id}
+                            className={`hover:bg-[#F8FAFC] transition-colors ${
+                              otp.status === 'ACTIVE' ? 'bg-amber-50/20' : ''
+                            }`}
+                          >
+                            <td className="py-4 px-6">
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-8 h-8 rounded-lg bg-[#0B1B29]/5 text-[#0B1B29] flex items-center justify-center font-bold text-xs">
+                                  <Phone className="w-4 h-4 text-[#0B1B29]" />
+                                </div>
+                                <span className="font-mono font-bold text-sm text-[#0B1B29]">
+                                  +91 {otp.phone}
+                                </span>
+                              </div>
+                            </td>
+
+                            <td className="py-4 px-6">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xl font-black text-[#D92F43] tracking-widest bg-red-50 border border-red-100 px-3 py-1 rounded-xl">
+                                  {otp.otpCode}
+                                </span>
+                              </div>
+                            </td>
+
+                            <td className="py-4 px-6">
+                              {otp.status === 'ACTIVE' ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  ACTIVE (Valid)
+                                </span>
+                              ) : otp.status === 'USED' ? (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                                  ✓ Used
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                  Expired
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="py-4 px-6 text-xs text-[#64748B] font-medium">
+                              {otp.requestedAt || new Date(otp.createdAt).toLocaleTimeString()}
+                            </td>
+
+                            <td className="py-4 px-6 text-right">
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(otp.otpCode);
+                                  setMasterOtpCopied(otp.otpCode);
+                                  setTimeout(() => setMasterOtpCopied(null), 2000);
+                                }}
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
+                                  isCopied
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'bg-[#0B1B29] hover:bg-[#1E293B] text-white'
+                                }`}
+                              >
+                                {isCopied ? (
+                                  <>
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>Copied!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="w-3.5 h-3.5" />
+                                    <span>Copy OTP</span>
+                                  </>
+                                )}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 2: Create App Login */}
+          {masterSubTab === 'create_login' && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+              {/* Left Form: Provisioning */}
+              <div className="lg:col-span-7 bg-white rounded-3xl p-6 sm:p-8 border border-[#E2E8F0] shadow-xs">
+                <div className="flex items-center gap-3 mb-6 pb-4 border-b border-[#F1F5F9]">
+                  <div className="w-12 h-12 rounded-2xl bg-red-50 text-[#D92F43] flex items-center justify-center font-bold">
+                    <UserPlus className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-lg text-[#0B1B29]">Create App Login for Restaurant</h3>
+                    <p className="text-xs text-[#64748B]">
+                      Provision a new restaurant account. Credentials can be used immediately on the mobile app.
+                    </p>
+                  </div>
+                </div>
+
+                {createLoginError && (
+                  <div className="mb-6 p-4 rounded-2xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{createLoginError}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleCreateAppLogin} className="space-y-4">
+                  <div>
+                    <label className="text-xs font-bold text-[#0B1B29] block mb-1.5">
+                      Owner Mobile Number <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <Phone className="w-4 h-4 text-[#94A3B8] absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="tel"
+                        value={createLoginPhone}
+                        onChange={(e) => setCreateLoginPhone(e.target.value)}
+                        placeholder="e.g. 9876543210"
+                        maxLength={10}
+                        required
+                        className="w-full pl-10 pr-4 py-3 bg-[#F8FAFC] border border-[#E2E8F0] focus:border-[#D92F43] focus:bg-white rounded-xl text-sm font-semibold outline-hidden transition-all"
+                      />
+                    </div>
+                    <p className="text-[11px] text-[#64748B] mt-1">This will be the primary login identifier for the mobile app.</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-[#0B1B29] block mb-1.5">
+                        Owner / Manager Full Name <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={createLoginName}
+                        onChange={(e) => setCreateLoginName(e.target.value)}
+                        placeholder="e.g. Ramesh Kumar"
+                        required
+                        className="w-full px-4 py-3 bg-[#F8FAFC] border border-[#E2E8F0] focus:border-[#D92F43] focus:bg-white rounded-xl text-sm font-semibold outline-hidden transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-[#0B1B29] block mb-1.5">
+                        Initial Staff PIN <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={createLoginPin}
+                        onChange={(e) => setCreateLoginPin(e.target.value)}
+                        placeholder="1234"
+                        maxLength={6}
+                        required
+                        className="w-full px-4 py-3 bg-[#F8FAFC] border border-[#E2E8F0] focus:border-[#D92F43] focus:bg-white rounded-xl text-sm font-mono font-bold outline-hidden transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-[#0B1B29] block mb-1.5">
+                      Restaurant / Outlet Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={createLoginRestName}
+                      onChange={(e) => setCreateLoginRestName(e.target.value)}
+                      placeholder="e.g. Royal Punjab Dhaba"
+                      required
+                      className="w-full px-4 py-3 bg-[#F8FAFC] border border-[#E2E8F0] focus:border-[#D92F43] focus:bg-white rounded-xl text-sm font-semibold outline-hidden transition-all"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-xs font-bold text-[#0B1B29] block mb-1.5">Location / City</label>
+                      <input
+                        type="text"
+                        value={createLoginLocation}
+                        onChange={(e) => setCreateLoginLocation(e.target.value)}
+                        placeholder="e.g. MG Road, Bengaluru"
+                        className="w-full px-4 py-3 bg-[#F8FAFC] border border-[#E2E8F0] focus:border-[#D92F43] focus:bg-white rounded-xl text-sm font-semibold outline-hidden transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-[#0B1B29] block mb-1.5">Subscription Plan</label>
+                      <select
+                        value={createLoginPlan}
+                        onChange={(e) => setCreateLoginPlan(e.target.value)}
+                        className="w-full px-4 py-3 bg-[#F8FAFC] border border-[#E2E8F0] focus:border-[#D92F43] focus:bg-white rounded-xl text-sm font-semibold outline-hidden transition-all"
+                      >
+                        <option value="plan_starter_3000">Starter Plan (₹2,999/mo - 2 Devices)</option>
+                        <option value="plan_growth_6000">Growth Plan (₹5,999/mo - 5 Devices)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="pt-4">
+                    <button
+                      type="submit"
+                      disabled={isCreatingLogin}
+                      className="w-full py-3.5 bg-[#D92F43] hover:bg-[#B82035] disabled:opacity-50 text-white rounded-xl font-black text-sm transition-all shadow-md flex items-center justify-center gap-2"
+                    >
+                      {isCreatingLogin ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Provisioning Account & Generating Access...</span>
+                        </>
+                      ) : (
+                        <>
+                          <UserPlus className="w-4 h-4" />
+                          <span>Provision & Create App Login</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Right: Created Credentials & Information */}
+              <div className="lg:col-span-5 space-y-6">
+                {createdLoginSuccess ? (
+                  <div className="bg-emerald-50 border-2 border-emerald-400 rounded-3xl p-6 shadow-md animate-in fade-in duration-300">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center font-bold">
+                        <Check className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-black text-base text-emerald-900">App Login Ready!</h4>
+                        <p className="text-xs text-emerald-700">Account successfully provisioned</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl p-4 border border-emerald-200 space-y-3 mb-4">
+                      <div className="flex justify-between items-center text-xs pb-2 border-b border-emerald-100">
+                        <span className="text-slate-500">Restaurant:</span>
+                        <span className="font-bold text-slate-800">{createdLoginSuccess.restaurantName}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs pb-2 border-b border-emerald-100">
+                        <span className="text-slate-500">Owner Name:</span>
+                        <span className="font-bold text-slate-800">{createdLoginSuccess.fullName}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs pb-2 border-b border-emerald-100">
+                        <span className="text-slate-500">App Login Phone:</span>
+                        <span className="font-mono font-bold text-slate-900">+91 {createdLoginSuccess.phone}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs pb-2 border-b border-emerald-100">
+                        <span className="text-slate-500">Universal Master OTP:</span>
+                        <span className="font-mono font-black text-[#D92F43] bg-red-50 px-2 py-0.5 rounded">
+                          {createdLoginSuccess.masterOtp}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-slate-500">Staff PIN:</span>
+                        <span className="font-mono font-bold text-slate-800">{createdLoginSuccess.initialPin}</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        const text = `Ezydine Mobile App Login Details:\n• Restaurant: ${createdLoginSuccess.restaurantName}\n• Mobile: +91 ${createdLoginSuccess.phone}\n• Master OTP: ${createdLoginSuccess.masterOtp}\n• Staff PIN: ${createdLoginSuccess.initialPin}`;
+                        navigator.clipboard.writeText(text);
+                        setMasterOtpCopied('full_details');
+                        setTimeout(() => setMasterOtpCopied(null), 2500);
+                      }}
+                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-xs"
+                    >
+                      {masterOtpCopied === 'full_details' ? (
+                        <>
+                          <Check className="w-4 h-4" />
+                          <span>Credentials Copied to Clipboard!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-4 h-4" />
+                          <span>Copy WhatsApp / SMS Message</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-3xl p-6 border border-[#E2E8F0] shadow-xs">
+                    <h4 className="font-black text-sm text-[#0B1B29] mb-2 flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                      App Provisioning Instructions
+                    </h4>
+                    <p className="text-xs text-[#64748B] leading-relaxed mb-4">
+                      When you create an app login here:
+                    </p>
+                    <ol className="text-xs text-[#64748B] space-y-2.5 list-decimal pl-4">
+                      <li>The user record is instantly created in the master database.</li>
+                      <li>A 30-day active subscription is assigned automatically.</li>
+                      <li>
+                        The owner can enter this phone number on the Mobile App, request OTP, and use either the live
+                        generated OTP or the universal master OTP <strong className="text-[#0B1B29]">123456</strong>.
+                      </li>
+                      <li>The initial PIN is set to <strong className="text-[#0B1B29]">1234</strong> (or your custom value).</li>
+                    </ol>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: Registered App Accounts */}
+          {masterSubTab === 'logins' && (
+            <div className="bg-white rounded-3xl border border-[#E2E8F0] shadow-xs overflow-hidden">
+              <div className="p-6 border-b border-[#F1F5F9] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#F8FAFC]">
+                <div>
+                  <h3 className="font-black text-lg text-[#0B1B29] flex items-center gap-2">
+                    <HardDrive className="w-5 h-5 text-[#0B1B29]" />
+                    Registered Restaurant Mobile App Logins
+                  </h3>
+                  <p className="text-xs text-[#64748B] mt-0.5">
+                    All accounts created in the system with active credentials and device allocations.
+                  </p>
+                </div>
+                <div className="text-xs font-bold text-[#64748B]">
+                  Total: <span className="text-[#0B1B29]">{masterAppLogins.length} accounts</span>
+                </div>
+              </div>
+
+              {masterAppLogins.length === 0 ? (
+                <div className="py-16 text-center">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-4">
+                    <User className="w-8 h-8" />
+                  </div>
+                  <h4 className="font-bold text-base text-[#0B1B29]">No Registered Logins Found</h4>
+                  <p className="text-xs text-[#64748B] mt-1">Use "Create App Login" above to register the first restaurant.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-[#F1F5F9] text-[11px] font-bold text-[#64748B] uppercase tracking-wider bg-white">
+                        <th className="py-3.5 px-6">Restaurant & Owner</th>
+                        <th className="py-3.5 px-6">Login Phone</th>
+                        <th className="py-3.5 px-6">Subscription Plan</th>
+                        <th className="py-3.5 px-6">Device Usage</th>
+                        <th className="py-3.5 px-6">Registered On</th>
+                        <th className="py-3.5 px-6 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#F1F5F9]">
+                      {masterAppLogins.map((item) => (
+                        <tr key={item.userId} className="hover:bg-[#F8FAFC] transition-colors">
+                          <td className="py-4 px-6">
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-xl bg-[#0B1B29] text-white flex items-center justify-center font-bold text-sm shrink-0">
+                                {item.fullName.charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <div className="font-bold text-sm text-[#0B1B29]">{item.restaurantName}</div>
+                                <div className="text-xs text-[#64748B]">
+                                  {item.fullName} • {item.location}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="py-4 px-6">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-sm text-[#0B1B29]">
+                                +91 {item.phone}
+                              </span>
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(item.phone);
+                                  setMasterOtpCopied(`phone_${item.userId}`);
+                                  setTimeout(() => setMasterOtpCopied(null), 2000);
+                                }}
+                                className="text-slate-400 hover:text-slate-600 p-1"
+                                title="Copy Phone Number"
+                              >
+                                {masterOtpCopied === `phone_${item.userId}` ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                          </td>
+
+                          <td className="py-4 px-6">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                              {item.planName}
+                            </span>
+                          </td>
+
+                          <td className="py-4 px-6">
+                            <div className="flex items-center gap-2 text-xs font-semibold text-[#0B1B29]">
+                              <Smartphone className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{item.activeDevices || 1} / {item.deviceLimit} Devices</span>
+                            </div>
+                          </td>
+
+                          <td className="py-4 px-6 text-xs text-[#64748B]">
+                            {item.createdAt}
+                          </td>
+
+                          <td className="py-4 px-6 text-right">
+                            <button
+                              onClick={() => handleDeleteAppLogin(item.userId, item.restaurantName)}
+                              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+                              title="Delete Account"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Real Hardware Printer Device Connect Modal */}
       {isPrinterModalOpen && (
         <div className="fixed inset-0 z-50 bg-[#0B1B29]/70 backdrop-blur-xs flex items-center justify-center p-4">
@@ -2347,12 +3276,10 @@ export default function ManagerOrderPortal() {
 
             <div className="mt-5 pt-4 border-t border-[#F1F5F9] grid grid-cols-2 gap-2">
               <button
-                onClick={() => {
-                  window.print();
-                }}
+                onClick={handleDirectTestPrint}
                 className="border border-[#E2E8F0] hover:bg-[#F8FAFC] text-[#0B1B29] py-2.5 rounded-xl font-bold text-xs transition-colors"
               >
-                Test Printer Slip
+                Test Direct Print
               </button>
               <button
                 onClick={() => setIsPrinterModalOpen(false)}
@@ -2728,15 +3655,16 @@ export default function ManagerOrderPortal() {
               </button>
 
               <div className="flex items-center gap-2">
-                {/* Optional Hardware / System Print Button */}
+                {/* DIRECT AUTOMATIC THERMAL PRINT - ZERO BROWSER POP-UP */}
                 <button
                   type="button"
-                  onClick={() => window.print()}
-                  className="flex items-center gap-1.5 bg-[#0B1B29] hover:bg-[#1E293B] text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs"
-                  title="Open system print dialog if you wish to spool to physical hardware printer"
+                  disabled={isDirectPrinting}
+                  onClick={handleDirectHardwarePrint}
+                  className="flex items-center gap-1.5 bg-[#0B1B29] hover:bg-[#1E293B] text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs disabled:opacity-75"
+                  title="Direct automatic print without opening browser system pop-up"
                 >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Send to Printer</span>
+                  <Printer className={`w-3.5 h-3.5 ${isDirectPrinting ? 'animate-bounce text-[#10B981]' : ''}`} />
+                  <span>{isDirectPrinting ? 'Printing Directly...' : 'Direct Print (Auto)'}</span>
                 </button>
 
                 <button

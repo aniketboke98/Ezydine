@@ -11,6 +11,8 @@ import inventoryRoutes from './routes/inventory';
 import reportsRoutes from './routes/reports';
 import restaurantRoutes from './routes/restaurant';
 import staffRoutes from './routes/staff';
+import masterRoutes from './routes/master';
+import printRoutes from './routes/print';
 
 dotenv.config();
 
@@ -48,6 +50,8 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/restaurant', restaurantRoutes);
 app.use('/api/staff', staffRoutes);
+app.use('/api/master', masterRoutes);
+app.use('/api/print', printRoutes);
 
 // 404 handler
 app.use((req, res) => {
