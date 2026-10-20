@@ -40,6 +40,7 @@ export default function App() {
   const [activeBillTotal, setActiveBillTotal] = useState(630.0);
   const [authIdentifier, setAuthIdentifier] = useState('');
   const [authDemoOtp, setAuthDemoOtp] = useState('');
+  const [authRegData, setAuthRegData] = useState<any>(null);
   const [selectedPlanId, setSelectedPlanId] = useState('plan_starter_3000');
   const [hasAuthToken, setHasAuthToken] = useState(false);
 
@@ -92,9 +93,10 @@ export default function App() {
 
           {currentScreen === 'signin' && (
             <SignInScreen
-              onProceedToOtp={(identifier, demoOtp) => {
+              onProceedToOtp={(identifier, demoOtp, registrationData) => {
                 setAuthIdentifier(identifier);
                 if (demoOtp) setAuthDemoOtp(demoOtp);
+                setAuthRegData(registrationData || null);
                 setCurrentScreen('otp_verification');
               }}
               onBackToSplash={() => setCurrentScreen('splash')}
@@ -105,6 +107,7 @@ export default function App() {
             <OTPVerificationScreen
               identifier={authIdentifier}
               demoOtp={authDemoOtp}
+              registrationData={authRegData}
               onVerificationSuccess={() => {
                 setHasAuthToken(true);
                 setCurrentScreen('dashboard');

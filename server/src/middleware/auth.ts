@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { query } from '../db';
+import prisma from '../db/prisma';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'ezydine_super_secure_jwt_secret_key_2026';
 
@@ -8,18 +8,114 @@ export interface AuthRequest extends Request {
   user?: {
     id: number;
     phone: string;
-    email: string;
+    email: string | null;
     full_name: string;
     role: string;
   };
+  staffId?: number;
   restaurantId?: number;
   restaurant?: any;
   deviceId?: string;
+  permissions?: string[];
   plan?: {
     id: string;
     name: string;
     device_limit: number;
   };
+}
+
+export async function getUserPermissions(
+  userId?: number,
+  staffId?: number,
+  restaurantId?: number
+): Promise<string[]> {
+  try {
+    // If staff member, resolve their assigned role's permissions
+    if (staffId) {
+      const staff = await prisma.staffMember.findUnique({
+        where: { id: staffId },
+        include: {
+          roleRef: {
+            include: {
+              rolePermissions: {
+                include: { permission: true },
+              },
+            },
+          },
+        },
+      });
+
+      if (!staff) return [];
+
+      // Check if roleRef has mapped permissions
+      if (staff.roleRef?.rolePermissions) {
+        const perms = staff.roleRef.rolePermissions.map((rp) => rp.permission.code);
+        if (perms.length > 0) return perms;
+      }
+
+      // Fallback to role name lookup
+      const roleName = staff.role;
+      const matchedRole = await prisma.role.findFirst({
+        where: {
+          name: { equals: roleName, mode: 'insensitive' },
+          OR: [{ restaurantId: restaurantId || null }, { isSystem: true }],
+        },
+        include: {
+          rolePermissions: {
+            include: { permission: true },
+          },
+        },
+      });
+
+      if (matchedRole?.rolePermissions) {
+        return matchedRole.rolePermissions.map((rp) => rp.permission.code);
+      }
+    }
+
+    // If owner / main user:
+    if (userId) {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+          userRoles: {
+            where: restaurantId ? { restaurantId } : undefined,
+            include: {
+              role: {
+                include: {
+                  rolePermissions: {
+                    include: { permission: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!user) return [];
+
+      // If user has 'owner' role or userRoles, collect permissions
+      if (user.role.toLowerCase() === 'owner') {
+        // Owners possess all permissions
+        const all = await prisma.permission.findMany({ select: { code: true } });
+        return all.map((p) => p.code);
+      }
+
+      const permissionSet = new Set<string>();
+      for (const ur of user.userRoles) {
+        for (const rp of ur.role.rolePermissions) {
+          permissionSet.add(rp.permission.code);
+        }
+      }
+
+      return Array.from(permissionSet);
+    }
+
+    return [];
+  } catch (err) {
+    console.error('Error resolving user permissions:', err);
+    return [];
+  }
 }
 
 export async function requireAuth(req: AuthRequest, res: Response, next: NextFunction) {
@@ -50,56 +146,72 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
     let resolvedRestId = restaurantId;
 
     if (userId) {
-      const userResult = await query(
-        'SELECT id, phone, email, full_name, role FROM users WHERE id = $1',
-        [userId]
-      );
-      if (userResult.rows.length > 0) {
-        user = userResult.rows[0];
+      const dbUser = await prisma.user.findUnique({
+        where: { id: userId },
+      });
+      if (dbUser) {
+        user = {
+          id: dbUser.id,
+          phone: dbUser.phone,
+          email: dbUser.email,
+          full_name: dbUser.fullName,
+          role: dbUser.role,
+        };
       }
     }
 
     if (!user && staffId) {
-      const staffRes = await query('SELECT * FROM staff_members WHERE id = $1', [staffId]);
-      if (staffRes.rows.length > 0) {
-        const s = staffRes.rows[0];
-        user = { id: s.id, phone: s.phone, email: '', full_name: s.name, role: s.role.toLowerCase() };
-        resolvedRestId = s.restaurant_id;
+      const staff = await prisma.staffMember.findUnique({
+        where: { id: staffId },
+      });
+      if (staff && staff.isActive) {
+        user = {
+          id: staff.id,
+          phone: staff.phone,
+          email: null,
+          full_name: staff.name,
+          role: staff.role.toLowerCase(),
+        };
+        resolvedRestId = staff.restaurantId;
       }
     }
 
     if (!user) {
       return res.status(401).json({
         success: false,
-        error: 'User not found or account deactivated.',
+        error: 'User account not found or deactivated. Please sign in again.',
       });
     }
 
     // Resolve restaurant
     let restaurant: any = null;
     if (resolvedRestId) {
-      const restRes = await query('SELECT * FROM restaurant_profile WHERE id = $1', [resolvedRestId]);
-      restaurant = restRes.rows[0] || null;
+      restaurant = await prisma.restaurantProfile.findUnique({
+        where: { id: resolvedRestId },
+      });
     } else {
-      const restRes = await query('SELECT * FROM restaurant_profile WHERE user_id = $1 ORDER BY id DESC LIMIT 1', [user.id]);
-      restaurant = restRes.rows[0] || null;
+      restaurant = await prisma.restaurantProfile.findFirst({
+        where: { userId: user.id },
+        orderBy: { id: 'desc' },
+      });
       if (restaurant) resolvedRestId = restaurant.id;
     }
 
-    // Verify active plan
-    const subResult = await query(`
-      SELECT s.id as sub_id, s.status, s.expires_at, p.id as plan_id, p.name as plan_name, p.device_limit
-      FROM subscriptions s
-      JOIN plans p ON s.plan_id = p.id
-      WHERE s.user_id = $1 AND s.status = 'active'
-      ORDER BY s.id DESC LIMIT 1
-    `, [user.id]);
+    // Fetch subscription plan
+    const sub = await prisma.subscription.findFirst({
+      where: {
+        userId: user.id,
+        status: 'active',
+      },
+      include: { plan: true },
+      orderBy: { id: 'desc' },
+    });
 
-    const plan = subResult.rows[0]
+    const plan = sub?.plan
       ? {
-          id: subResult.rows[0].plan_id,
-          name: subResult.rows[0].plan_name,
-          device_limit: subResult.rows[0].device_limit,
+          id: sub.plan.id,
+          name: sub.plan.name,
+          device_limit: sub.plan.deviceLimit,
         }
       : {
           id: 'plan_starter_3000',
@@ -107,18 +219,31 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
           device_limit: 3,
         };
 
-    // Verify device active status in DB
+    // Keep device activity updated
     if (deviceId && user.id) {
-      await query(
-        `UPDATE devices SET last_active = CURRENT_TIMESTAMP WHERE user_id = $1 AND device_id = $2`,
-        [user.id, deviceId]
-      );
+      try {
+        await prisma.device.updateMany({
+          where: { userId: user.id, deviceId },
+          data: { lastActive: new Date(), isActive: true },
+        });
+      } catch {
+        // Non-blocking device ping
+      }
     }
 
+    // Resolve dynamic permissions
+    const permissions = await getUserPermissions(
+      user.role === 'owner' ? user.id : undefined,
+      staffId,
+      resolvedRestId
+    );
+
     req.user = user;
+    req.staffId = staffId;
     req.restaurantId = resolvedRestId;
     req.restaurant = restaurant;
     req.deviceId = deviceId;
+    req.permissions = permissions;
     req.plan = plan;
 
     next();
@@ -126,4 +251,29 @@ export async function requireAuth(req: AuthRequest, res: Response, next: NextFun
     console.error('Auth middleware error:', error);
     return res.status(500).json({ success: false, error: 'Internal server authentication error' });
   }
+}
+
+// Granular RBAC Permission Middleware
+export function requirePermission(permissionCode: string) {
+  return (req: AuthRequest, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+
+    // Owner role automatically bypasses granular restriction
+    if (req.user.role?.toLowerCase() === 'owner') {
+      return next();
+    }
+
+    const perms = req.permissions || [];
+    if (!perms.includes(permissionCode)) {
+      return res.status(403).json({
+        success: false,
+        error: `Permission denied: Requires permission '${permissionCode}'`,
+        requiredPermission: permissionCode,
+      });
+    }
+
+    next();
+  };
 }

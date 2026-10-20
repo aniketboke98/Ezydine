@@ -1,35 +1,52 @@
 import { Router, Response } from 'express';
-import { query } from '../db';
-import { requireAuth, AuthRequest } from '../middleware/auth';
+import prisma from '../db/prisma';
+import { requireAuth, requirePermission, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
-// GET inventory items and summary
-router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
+// GET inventory items and summary for authenticated restaurant
+router.get('/', requireAuth, requirePermission('VIEW_INVENTORY'), async (req: AuthRequest, res: Response) => {
   try {
-    const itemsResult = await query(`
-      SELECT id, name, category, quantity, unit,
-             min_threshold as "minThreshold", cost_per_unit as "costPerUnit",
-             ROUND((quantity * cost_per_unit), 2) as "totalValue",
-             (quantity <= min_threshold) as "isLowStock"
-      FROM inventory_items
-      ORDER BY (quantity <= min_threshold) DESC, name ASC
-    `);
+    const restaurantId = req.restaurantId || (req.restaurant && req.restaurant.id);
+    if (!restaurantId) {
+      return res.status(400).json({ success: false, error: 'Restaurant context required' });
+    }
 
-    const totalValue = itemsResult.rows.reduce(
-      (sum, item) => sum + parseFloat(item.totalValue || 0),
-      0
-    );
+    const items = await prisma.inventoryItem.findMany({
+      where: { restaurantId },
+      orderBy: { name: 'asc' },
+    });
 
-    const lowStockCount = itemsResult.rows.filter((item) => item.isLowStock).length;
+    const formatted = items.map((item) => {
+      const qty = Number(item.quantity);
+      const minThresh = Number(item.minThreshold);
+      const cost = Number(item.costPerUnit);
+      const totalVal = Math.round(qty * cost * 100) / 100;
+      const isLow = qty <= minThresh;
+
+      return {
+        id: item.id,
+        name: item.name,
+        category: item.category,
+        quantity: qty,
+        unit: item.unit,
+        minThreshold: minThresh,
+        costPerUnit: cost,
+        totalValue: totalVal,
+        isLowStock: isLow,
+      };
+    });
+
+    const totalStockValue = formatted.reduce((sum, item) => sum + item.totalValue, 0);
+    const lowStockAlertsCount = formatted.filter((item) => item.isLowStock).length;
 
     return res.json({
       success: true,
-      items: itemsResult.rows,
+      items: formatted,
       summary: {
-        totalStockValue: totalValue,
-        totalItemsCount: itemsResult.rows.length,
-        lowStockAlertsCount: lowStockCount,
+        totalStockValue,
+        totalItemsCount: formatted.length,
+        lowStockAlertsCount,
       },
     });
   } catch (error) {
@@ -39,25 +56,68 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
 });
 
 // Adjust stock quantity
-router.post('/adjust', requireAuth, async (req: AuthRequest, res: Response) => {
+router.post('/adjust', requireAuth, requirePermission('MANAGE_INVENTORY'), async (req: AuthRequest, res: Response) => {
   try {
+    const restaurantId = req.restaurantId || (req.restaurant && req.restaurant.id);
     const { id, adjustment, reason } = req.body;
 
-    const result = await query(`
-      UPDATE inventory_items
-      SET quantity = GREATEST(0, quantity + $1),
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = $2
-      RETURNING *
-    `, [adjustment, id]);
+    const item = await prisma.inventoryItem.findFirst({
+      where: { id: Number(id), restaurantId },
+    });
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'Item not found' });
+    if (!item) {
+      return res.status(404).json({ success: false, error: 'Inventory item not found' });
     }
 
-    return res.json({ success: true, item: result.rows[0] });
+    const newQty = Math.max(0, Number(item.quantity) + Number(adjustment));
+
+    const updated = await prisma.inventoryItem.update({
+      where: { id: item.id },
+      data: { quantity: newQty },
+    });
+
+    return res.json({
+      success: true,
+      item: {
+        id: updated.id,
+        name: updated.name,
+        category: updated.category,
+        quantity: Number(updated.quantity),
+        unit: updated.unit,
+        minThreshold: Number(updated.minThreshold),
+        costPerUnit: Number(updated.costPerUnit),
+      },
+    });
   } catch (error) {
     return res.status(500).json({ success: false, error: 'Failed to adjust stock' });
+  }
+});
+
+// Add new inventory item
+router.post('/', requireAuth, requirePermission('MANAGE_INVENTORY'), async (req: AuthRequest, res: Response) => {
+  try {
+    const restaurantId = req.restaurantId || (req.restaurant && req.restaurant.id);
+    const { name, category, quantity, unit, minThreshold, costPerUnit } = req.body;
+
+    if (!name || !category || !unit) {
+      return res.status(400).json({ success: false, error: 'Name, category, and unit are required' });
+    }
+
+    const created = await prisma.inventoryItem.create({
+      data: {
+        restaurantId,
+        name: name.trim(),
+        category: category.trim(),
+        quantity: quantity !== undefined ? Number(quantity) : 0,
+        unit: unit.trim(),
+        minThreshold: minThreshold !== undefined ? Number(minThreshold) : 5,
+        costPerUnit: costPerUnit !== undefined ? Number(costPerUnit) : 0,
+      },
+    });
+
+    return res.status(201).json({ success: true, item: created });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: 'Failed to create inventory item' });
   }
 });
 

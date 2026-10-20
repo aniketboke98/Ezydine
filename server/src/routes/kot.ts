@@ -1,21 +1,39 @@
 import { Router, Response } from 'express';
-import { query } from '../db';
-import { requireAuth, AuthRequest } from '../middleware/auth';
+import prisma from '../db/prisma';
+import { requireAuth, requirePermission, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
-// GET active KOT orders
-router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
+// GET active KOT orders for authenticated restaurant
+router.get('/', requireAuth, requirePermission('VIEW_KOT'), async (req: AuthRequest, res: Response) => {
   try {
-    const result = await query(`
-      SELECT id, kot_number as "kotNumber", table_number as "tableNumber",
-             status, items, time_elapsed as "timeElapsed",
-             TO_CHAR(created_at, 'HH12:MI AM') as "createdAt"
-      FROM kot_orders
-      ORDER BY id DESC
-    `);
+    const restaurantId = req.restaurantId || (req.restaurant && req.restaurant.id);
+    if (!restaurantId) {
+      return res.status(400).json({ success: false, error: 'Restaurant context required' });
+    }
 
-    return res.json({ success: true, orders: result.rows });
+    const orders = await prisma.kotOrder.findMany({
+      where: { restaurantId },
+      orderBy: { id: 'desc' },
+      take: 50,
+    });
+
+    const formatted = orders.map((o) => {
+      const createdAt = new Date(o.createdAt);
+      const timeStr = createdAt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+      return {
+        id: o.id,
+        kotNumber: o.kotNumber,
+        tableNumber: o.tableNumber,
+        status: o.status,
+        items: o.items,
+        timeElapsed: o.timeElapsed,
+        createdAt: timeStr,
+      };
+    });
+
+    return res.json({ success: true, orders: formatted });
   } catch (error) {
     console.error('Error fetching KOT orders:', error);
     return res.status(500).json({ success: false, error: 'Failed to fetch KOT orders' });
@@ -23,23 +41,38 @@ router.get('/', requireAuth, async (req: AuthRequest, res: Response) => {
 });
 
 // Update KOT order status (pending -> preparing -> ready -> served)
-router.patch('/:id/status', requireAuth, async (req: AuthRequest, res: Response) => {
+router.all('/:id/status', requireAuth, requirePermission('UPDATE_KOT_STATUS'), async (req: AuthRequest, res: Response) => {
+  if (req.method !== 'PATCH' && req.method !== 'PUT') {
+    return res.status(405).json({ success: false, error: 'Method not allowed' });
+  }
   try {
-    const { id } = req.params;
+    const id = parseInt(req.params.id, 10);
+    const restaurantId = req.restaurantId || (req.restaurant && req.restaurant.id);
     const { status } = req.body;
 
-    const result = await query(`
-      UPDATE kot_orders
-      SET status = $1
-      WHERE id = $2
-      RETURNING id, kot_number as "kotNumber", table_number as "tableNumber", status, items
-    `, [status, id]);
+    const order = await prisma.kotOrder.findFirst({
+      where: { id, restaurantId },
+    });
 
-    if (result.rows.length === 0) {
+    if (!order) {
       return res.status(404).json({ success: false, error: 'KOT order not found' });
     }
 
-    return res.json({ success: true, order: result.rows[0] });
+    const updated = await prisma.kotOrder.update({
+      where: { id },
+      data: { status },
+    });
+
+    return res.json({
+      success: true,
+      order: {
+        id: updated.id,
+        kotNumber: updated.kotNumber,
+        tableNumber: updated.tableNumber,
+        status: updated.status,
+        items: updated.items,
+      },
+    });
   } catch (error) {
     return res.status(500).json({ success: false, error: 'Failed to update KOT status' });
   }

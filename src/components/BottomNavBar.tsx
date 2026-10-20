@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
-import { Ionicons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { ScreenType } from '../types';
+import { api } from '../services/api';
 
 interface BottomNavBarProps {
   currentScreen: ScreenType;
@@ -13,10 +14,43 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
   currentScreen,
   onNavigate,
 }) => {
-  const tabs = [
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [isOwner, setIsOwner] = useState(true); // Default permissive until loaded
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadPerms = async () => {
+      try {
+        const user = await api.getUser();
+        const perms = await api.getPermissions();
+        if (isMounted) {
+          const ownerCheck = !user || !user.role || user.role.toLowerCase() === 'owner';
+          setIsOwner(ownerCheck);
+          setPermissions(perms || []);
+        }
+      } catch {
+        // Fallback
+      }
+    };
+    loadPerms();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentScreen]);
+
+  const hasPerm = (required: string | string[]) => {
+    if (isOwner) return true;
+    if (Array.isArray(required)) {
+      return required.some((r) => permissions.includes(r));
+    }
+    return permissions.includes(required);
+  };
+
+  const allTabs = [
     {
       id: 'dashboard' as ScreenType,
       label: 'Home',
+      visible: true,
       icon: (active: boolean) => (
         <Ionicons
           name={active ? 'grid' : 'grid-outline'}
@@ -28,6 +62,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
     {
       id: 'new_bill' as ScreenType,
       label: 'Billing',
+      visible: hasPerm(['CREATE_BILL', 'VIEW_BILLS']),
       icon: (active: boolean) => (
         <Ionicons
           name={active ? 'receipt' : 'receipt-outline'}
@@ -39,6 +74,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
     {
       id: 'menu_management' as ScreenType,
       label: 'Menu',
+      visible: hasPerm(['VIEW_MENU', 'MANAGE_MENU']),
       icon: (active: boolean) => (
         <Ionicons
           name={active ? 'restaurant' : 'restaurant-outline'}
@@ -50,6 +86,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
     {
       id: 'kitchen' as ScreenType,
       label: 'Kitchen',
+      visible: hasPerm(['VIEW_KOT', 'UPDATE_KOT_STATUS']),
       icon: (active: boolean) => (
         <MaterialCommunityIcons
           name="chef-hat"
@@ -61,6 +98,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
     {
       id: 'my_subscription' as ScreenType,
       label: 'Plans',
+      visible: isOwner || hasPerm('MANAGE_SETTINGS'),
       icon: (active: boolean) => (
         <Ionicons
           name={active ? 'sparkles' : 'sparkles-outline'}
@@ -72,6 +110,7 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
     {
       id: 'profile' as ScreenType,
       label: 'Profile',
+      visible: true,
       icon: (active: boolean) => (
         <Ionicons
           name={active ? 'person' : 'person-outline'}
@@ -82,9 +121,11 @@ export const BottomNavBar: React.FC<BottomNavBarProps> = ({
     },
   ];
 
+  const visibleTabs = allTabs.filter((t) => t.visible);
+
   return (
     <View style={styles.container}>
-      {tabs.map((tab) => {
+      {visibleTabs.map((tab) => {
         const isActive =
           currentScreen === tab.id ||
           (tab.id === 'my_subscription' &&

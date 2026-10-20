@@ -1,0 +1,363 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -------------------------------------------------------------
+// 1. Authentication, Users & Sessions
+// -------------------------------------------------------------
+
+model User {
+  id                   Int                   @id @default(autoincrement())
+  phone                String                @unique @db.VarChar(20)
+  email                String?               @unique @db.VarChar(100)
+  fullName             String                @map("full_name") @db.VarChar(100)
+  role                 String                @default("owner") @db.VarChar(50) // Baseline / Fallback role
+  createdAt            DateTime              @default(now()) @map("created_at")
+  
+  restaurants          RestaurantProfile[]
+  subscriptions        Subscription[]
+  subscriptionPayments SubscriptionPayment[]
+  devices              Device[]
+  userRoles            UserRole[]
+
+  @@map("users")
+}
+
+model OtpCode {
+  id         Int      @id @default(autoincrement())
+  identifier String   @db.VarChar(100) // phone or email
+  code       String   @db.VarChar(6)
+  purpose    String   @default("login") @db.VarChar(20) // "login", "register", "password_reset"
+  expiresAt  DateTime @map("expires_at")
+  used       Boolean  @default(false)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("otp_codes")
+}
+
+model Device {
+  id         Int               @id @default(autoincrement())
+  userId     Int               @map("user_id")
+  deviceId   String            @map("device_id") @db.VarChar(150)
+  deviceName String            @map("device_name") @db.VarChar(100)
+  platform   String            @default("Mobile") @db.VarChar(50)
+  ipAddress  String?           @map("ip_address") @db.VarChar(50)
+  lastActive DateTime          @default(now()) @map("last_active")
+  isActive   Boolean           @default(true) @map("is_active")
+
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceId])
+  @@map("devices")
+}
+
+// -------------------------------------------------------------
+// 2. Dynamic RBAC (Roles & Granular Permissions)
+// -------------------------------------------------------------
+
+model Permission {
+  id              Int              @id @default(autoincrement())
+  code            String           @unique @db.VarChar(100) // e.g. "VIEW_REPORTS", "MANAGE_MENU", "CREATE_BILL"
+  name            String           @db.VarChar(100)
+  module          String           @db.VarChar(50) // "billing", "reports", "menu", "staff", "inventory", "settings", "tables", "kot"
+  description     String?          @db.VarChar(255)
+  createdAt       DateTime         @default(now()) @map("created_at")
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model Role {
+  id              Int               @id @default(autoincrement())
+  restaurantId    Int?              @map("restaurant_id") // Null for global/system template roles
+  name            String            @db.VarChar(50)
+  description     String?           @db.VarChar(255)
+  isSystem        Boolean           @default(false) @map("is_system")
+  createdAt       DateTime          @default(now()) @map("created_at")
+
+  restaurant      RestaurantProfile? @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+  staffMembers    StaffMember[]
+
+  @@unique([restaurantId, name])
+  @@map("roles")
+}
+
+model RolePermission {
+  id           Int        @id @default(autoincrement())
+  roleId       Int        @map("role_id")
+  permissionId Int        @map("permission_id")
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  id           Int               @id @default(autoincrement())
+  userId       Int               @map("user_id")
+  roleId       Int               @map("role_id")
+  restaurantId Int               @map("restaurant_id")
+
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role         Role              @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  restaurant   RestaurantProfile @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId, restaurantId])
+  @@map("user_roles")
+}
+
+// -------------------------------------------------------------
+// 3. Multi-Tenant Restaurant Profile, Staff & Attendance
+// -------------------------------------------------------------
+
+model RestaurantProfile {
+  id                Int               @id @default(autoincrement())
+  userId            Int               @map("user_id")
+  name              String            @db.VarChar(100)
+  location          String            @db.VarChar(200)
+  phone             String            @db.VarChar(50)
+  gstNumber         String?           @default("29AABCT1332L1Z4") @map("gst_number") @db.VarChar(50)
+  gstRate           Decimal           @default(5.0) @map("gst_rate") @db.Decimal(5, 2)
+  fssai             String?           @default("11223344556677") @db.VarChar(50)
+  thermalPaperWidth String?           @default("58mm") @map("thermal_paper_width") @db.VarChar(10)
+  kotEnabled        Boolean           @default(true) @map("kot_enabled")
+  logoUrl           String?           @map("logo_url")
+  updatedAt         DateTime          @default(now()) @updatedAt @map("updated_at")
+
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  staffMembers      StaffMember[]
+  attendance        StaffAttendance[]
+  tables            Table[]
+  menuItems         MenuItem[]
+  bills             Bill[]
+  kotOrders         KotOrder[]
+  inventoryItems    InventoryItem[]
+  roles             Role[]
+  userRoles         UserRole[]
+
+  @@map("restaurant_profile")
+}
+
+model StaffMember {
+  id               Int               @id @default(autoincrement())
+  restaurantId     Int               @map("restaurant_id")
+  name             String            @db.VarChar(100)
+  phone            String            @db.VarChar(50)
+  role             String            @db.VarChar(50) // "Owner", "Manager", "Cashier", "Chef", "Waiter"
+  roleId           Int?              @map("role_id")
+  pin              String            @db.VarChar(10)
+  isActive         Boolean           @default(true) @map("is_active")
+  canEditMenu      Boolean           @default(false) @map("can_edit_menu")
+  canAccessReports Boolean           @default(false) @map("can_access_reports")
+  createdAt        DateTime          @default(now()) @map("created_at")
+
+  restaurant       RestaurantProfile @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  roleRef          Role?             @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  attendance       StaffAttendance[]
+
+  @@unique([restaurantId, phone])
+  @@map("staff_members")
+}
+
+model StaffAttendance {
+  id           Int               @id @default(autoincrement())
+  restaurantId Int               @map("restaurant_id")
+  staffId      Int               @map("staff_id")
+  date         DateTime          @db.Date
+  clockIn      String?           @map("clock_in") @db.VarChar(50)
+  clockOut     String?           @map("clock_out") @db.VarChar(50)
+  status       String            @default("unmarked") @db.VarChar(20)
+  shift        String?           @default("Full Day") @db.VarChar(50)
+  notes        String?           @db.Text
+  createdAt    DateTime          @default(now()) @map("created_at")
+
+  restaurant   RestaurantProfile @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  staff        StaffMember       @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([restaurantId, staffId, date])
+  @@map("staff_attendance")
+}
+
+// -------------------------------------------------------------
+// 4. Tables, Floor Plan & Seating
+// -------------------------------------------------------------
+
+model Table {
+  id           Int               @id @default(autoincrement())
+  restaurantId Int               @map("restaurant_id")
+  tableNumber  String            @map("table_number") @db.VarChar(10)
+  status       String            @default("available") @db.VarChar(20) // "available", "occupied", "billed"
+  seats        Int               @default(4)
+  section      String            @default("Dine-In") @db.VarChar(50) // "AC Hall", "Garden", "Rooftop"
+  activeTime   String?           @map("active_time") @db.VarChar(50)
+  activeAmount Decimal           @default(0) @map("active_amount") @db.Decimal(10, 2)
+  guestCount   Int               @default(0) @map("guest_count")
+
+  restaurant   RestaurantProfile @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("tables")
+}
+
+// -------------------------------------------------------------
+// 5. Menu Management & Pricing
+// -------------------------------------------------------------
+
+model MenuItem {
+  id           Int               @id @default(autoincrement())
+  restaurantId Int               @map("restaurant_id")
+  name         String            @db.VarChar(100)
+  category     String            @db.VarChar(50)
+  price        Decimal           @db.Decimal(10, 2)
+  isVeg        Boolean           @default(true) @map("is_veg")
+  isAvailable  Boolean           @default(true) @map("is_available")
+  description  String?           @db.Text
+  imageUrl     String?           @map("image_url")
+
+  restaurant   RestaurantProfile @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("menu_items")
+}
+
+// -------------------------------------------------------------
+// 6. Bills, Orders & KOT
+// -------------------------------------------------------------
+
+model Bill {
+  id             Int               @id @default(autoincrement())
+  restaurantId   Int               @map("restaurant_id")
+  billNumber     String            @map("bill_number") @db.VarChar(50)
+  tableNumber    String            @map("table_number") @db.VarChar(10)
+  orderType      String            @default("Dine-In") @map("order_type") @db.VarChar(20) // "Dine-In", "Takeaway", "Delivery"
+  subtotal       Decimal           @db.Decimal(10, 2)
+  discount       Decimal           @default(0) @db.Decimal(10, 2)
+  gstAmount      Decimal           @default(0) @map("gst_amount") @db.Decimal(10, 2)
+  totalAmount    Decimal           @map("total_amount") @db.Decimal(10, 2)
+  paymentMethod  String?           @map("payment_method") @db.VarChar(20) // "Cash", "UPI", "Card", "Split"
+  paymentStatus  String            @default("unpaid") @map("payment_status") @db.VarChar(20) // "paid", "unpaid"
+  amountReceived Decimal?          @map("amount_received") @db.Decimal(10, 2)
+  changeReturned Decimal?          @map("change_returned") @db.Decimal(10, 2)
+  createdAt      DateTime          @default(now()) @map("created_at")
+
+  restaurant     RestaurantProfile @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  items          BillItem[]
+  kotOrders      KotOrder[]
+
+  @@map("bills")
+}
+
+model BillItem {
+  id       Int     @id @default(autoincrement())
+  billId   Int     @map("bill_id")
+  name     String  @db.VarChar(100)
+  price    Decimal @db.Decimal(10, 2)
+  quantity Int
+  subtotal Decimal @db.Decimal(10, 2)
+
+  bill     Bill    @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  @@map("bill_items")
+}
+
+model KotOrder {
+  id           Int                @id @default(autoincrement())
+  restaurantId Int                @map("restaurant_id")
+  kotNumber    String             @map("kot_number") @db.VarChar(20)
+  billId       Int?               @map("bill_id")
+  tableNumber  String             @map("table_number") @db.VarChar(10)
+  status       String             @default("pending") @db.VarChar(20) // "pending", "preparing", "ready", "served"
+  items        Json               // Array of { name, quantity, notes }
+  timeElapsed  String             @default("2m ago") @map("time_elapsed") @db.VarChar(20)
+  createdAt    DateTime           @default(now()) @map("created_at")
+
+  restaurant   RestaurantProfile  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  bill         Bill?              @relation(fields: [billId], references: [id], onDelete: SetNull)
+
+  @@map("kot_orders")
+}
+
+// -------------------------------------------------------------
+// 7. Inventory & Stock Tracking
+// -------------------------------------------------------------
+
+model InventoryItem {
+  id           Int               @id @default(autoincrement())
+  restaurantId Int               @map("restaurant_id")
+  name         String            @db.VarChar(100)
+  category     String            @db.VarChar(50) // "Dairy", "Spices", "Produce", etc.
+  quantity     Decimal           @default(0) @db.Decimal(10, 2)
+  unit         String            @db.VarChar(20) // "kg", "liters", "units", "packets"
+  minThreshold Decimal           @default(5) @map("min_threshold") @db.Decimal(10, 2)
+  costPerUnit  Decimal           @default(0) @map("cost_per_unit") @db.Decimal(10, 2)
+  updatedAt    DateTime          @default(now()) @updatedAt @map("updated_at")
+
+  restaurant   RestaurantProfile @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("inventory_items")
+}
+
+// -------------------------------------------------------------
+// 8. Plans & Subscriptions
+// -------------------------------------------------------------
+
+model Plan {
+  id                   String                @id @db.VarChar(50)
+  name                 String                @db.VarChar(100)
+  price                Int
+  duration             String                @default("monthly") @db.VarChar(20)
+  deviceLimit          Int                   @map("device_limit")
+  tagline              String?               @db.VarChar(150)
+  popular              Boolean               @default(false)
+  features             Json
+
+  subscriptions        Subscription[]
+  subscriptionPayments SubscriptionPayment[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                Int       @id @default(autoincrement())
+  userId            Int       @map("user_id")
+  planId            String    @map("plan_id") @db.VarChar(50)
+  status            String    @default("active") @db.VarChar(20)
+  startsAt          DateTime  @default(now()) @map("starts_at")
+  expiresAt         DateTime  @map("expires_at")
+  razorpayOrderId   String?   @map("razorpay_order_id") @db.VarChar(100)
+  razorpayPaymentId String?   @map("razorpay_payment_id") @db.VarChar(100)
+  amountPaid        Int?      @map("amount_paid")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan              Plan      @relation(fields: [planId], references: [id])
+
+  @@map("subscriptions")
+}
+
+model SubscriptionPayment {
+  id                Int      @id @default(autoincrement())
+  userId            Int      @map("user_id")
+  planId            String   @map("plan_id") @db.VarChar(50)
+  planName          String   @map("plan_name") @db.VarChar(100)
+  amount            Int
+  razorpayOrderId   String?  @map("razorpay_order_id") @db.VarChar(100)
+  razorpayPaymentId String?  @map("razorpay_payment_id") @db.VarChar(100)
+  paymentMethod     String?  @default("UPI / Card") @map("payment_method") @db.VarChar(50)
+  status            String   @default("SUCCESS") @db.VarChar(20)
+  invoiceNumber     String?  @map("invoice_number") @db.VarChar(50)
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan              Plan     @relation(fields: [planId], references: [id])
+
+  @@map("subscription_payments")
+}

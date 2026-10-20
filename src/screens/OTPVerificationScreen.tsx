@@ -6,7 +6,7 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-    KeyboardAvoidingView,
+  KeyboardAvoidingView,
   Platform,
   TouchableWithoutFeedback,
   Keyboard,
@@ -17,10 +17,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { EzyDineLogo } from '../components/EzyDineLogo';
 import { api } from '../services/api';
+import { RegistrationPayload } from './SignInScreen';
 
 interface OTPVerificationScreenProps {
   identifier: string;
   demoOtp?: string;
+  registrationData?: RegistrationPayload;
   onVerificationSuccess: (userData: any) => void;
   onBackToSignIn: () => void;
 }
@@ -28,6 +30,7 @@ interface OTPVerificationScreenProps {
 export const OTPVerificationScreen: React.FC<OTPVerificationScreenProps> = ({
   identifier,
   demoOtp,
+  registrationData,
   onVerificationSuccess,
   onBackToSignIn,
 }) => {
@@ -36,12 +39,12 @@ export const OTPVerificationScreen: React.FC<OTPVerificationScreenProps> = ({
   const [timer, setTimer] = useState(45);
   const [errorMessage, setErrorMessage] = useState('');
 
-  // Notify user of incoming OTP code via simulated push/SMS
+  // Show incoming OTP notification if provided
   useEffect(() => {
     if (demoOtp) {
       const timerId = setTimeout(() => {
         Alert.alert(
-          'SMS: EzyDine Security',
+          'Security Verification',
           `Your one-time verification code is ${demoOtp}. Valid for 10 minutes.`,
           [{ text: 'OK' }]
         );
@@ -68,11 +71,26 @@ export const OTPVerificationScreen: React.FC<OTPVerificationScreenProps> = ({
     setLoading(true);
 
     try {
-      const response = await api.auth.verifyOtp(identifier, otp);
-      if (response.success) {
+      let response;
+      if (registrationData) {
+        // Registration verification
+        response = await api.auth.verifyRegister({
+          fullName: registrationData.fullName,
+          phone: registrationData.phone,
+          email: registrationData.email,
+          restaurantName: registrationData.restaurantName,
+          location: registrationData.location,
+          otp: otp.trim(),
+        });
+      } else {
+        // Standard Login verification
+        response = await api.auth.verifyOtp(identifier, otp.trim());
+      }
+
+      if (response && response.success) {
         onVerificationSuccess(response);
       } else {
-        setErrorMessage(response.error || 'Invalid OTP code. Please try again.');
+        setErrorMessage(response?.error || 'Invalid OTP code. Please try again.');
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Verification failed. Please check network.');
@@ -85,8 +103,14 @@ export const OTPVerificationScreen: React.FC<OTPVerificationScreenProps> = ({
     if (timer > 0) return;
     setLoading(true);
     try {
-      const res = await api.auth.sendOtp(identifier);
-      if (res.success) {
+      let res;
+      if (registrationData) {
+        res = await api.auth.register(registrationData);
+      } else {
+        res = await api.auth.sendOtp(identifier);
+      }
+
+      if (res && res.success) {
         setTimer(45);
         if (res.otp) {
           Alert.alert(
@@ -106,10 +130,10 @@ export const OTPVerificationScreen: React.FC<OTPVerificationScreenProps> = ({
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.container}
+        style={styles.keyboardView}
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={styles.inner}>
+          <View style={styles.content}>
             {/* Header */}
             <View style={styles.header}>
               <TouchableOpacity
@@ -119,25 +143,26 @@ export const OTPVerificationScreen: React.FC<OTPVerificationScreenProps> = ({
               >
                 <Ionicons name="arrow-back" size={22} color={Colors.navy} />
               </TouchableOpacity>
-              <EzyDineLogo width={150} />
+              <EzyDineLogo width={140} />
             </View>
 
-            {/* Hero / Instruction */}
-            <View style={styles.heroSection}>
-              <View style={styles.badgeStep}>
-                <Ionicons name="shield-checkmark" size={16} color={Colors.primaryRed} />
-                <Text style={styles.badgeStepText}>STEP 2 OF 2 • TWO-FACTOR SECURITY</Text>
+            {/* Instruction Badge & Title */}
+            <View style={styles.instructionSection}>
+              <View style={styles.badgeShield}>
+                <Ionicons name="lock-closed" size={14} color={Colors.primaryRed} />
+                <Text style={styles.badgeShieldText}>
+                  {registrationData ? 'NEW RESTAURANT VERIFICATION' : 'SECURE 2-STEP LOGIN'}
+                </Text>
               </View>
-              <Text style={styles.title}>Enter verification code</Text>
+              <Text style={styles.title}>Enter 6-digit code</Text>
               <Text style={styles.subtitle}>
-                We sent a 6-digit OTP code to{' '}
-                <Text style={styles.boldText}>{identifier || 'your device'}</Text>
+                We sent a 6-digit verification code to{' '}
+                <Text style={styles.highlightText}>{identifier}</Text>.
               </Text>
             </View>
 
             {/* OTP Input Field */}
-            <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>Enter 6-Digit Code</Text>
+            <View style={styles.otpContainer}>
               <TextInput
                 style={styles.otpInput}
                 value={otp}
@@ -147,33 +172,21 @@ export const OTPVerificationScreen: React.FC<OTPVerificationScreenProps> = ({
                 }}
                 keyboardType="number-pad"
                 maxLength={6}
-                placeholder="••••••"
-                placeholderTextColor="#CBD5E1"
+                placeholder="------"
+                placeholderTextColor={Colors.border}
                 autoFocus
               />
             </View>
 
+            {/* Error Message */}
             {errorMessage ? (
               <View style={styles.errorBox}>
-                <Ionicons name="alert-circle" size={18} color={Colors.primaryRed} />
+                <Ionicons name="alert-circle" size={16} color={Colors.primaryRed} />
                 <Text style={styles.errorText}>{errorMessage}</Text>
               </View>
             ) : null}
 
-            {/* Resend Link */}
-            <View style={styles.resendRow}>
-              {timer > 0 ? (
-                <Text style={styles.timerText}>
-                  Resend code in <Text style={{ fontWeight: '700' }}>{timer}s</Text>
-                </Text>
-              ) : (
-                <TouchableOpacity onPress={handleResend} activeOpacity={0.7}>
-                  <Text style={styles.resendBtnText}>Didn't get code? Resend OTP</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-
-            {/* Verify CTA Button */}
+            {/* Verify CTA */}
             <TouchableOpacity
               style={[styles.verifyBtn, loading && styles.verifyBtnDisabled]}
               onPress={handleVerify}
@@ -184,18 +197,24 @@ export const OTPVerificationScreen: React.FC<OTPVerificationScreenProps> = ({
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <>
-                  <Text style={styles.verifyBtnText}>Verify & Launch POS</Text>
-                  <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+                  <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+                  <Text style={styles.verifyBtnText}>
+                    {registrationData ? 'Complete Registration' : 'Verify & Continue'}
+                  </Text>
                 </>
               )}
             </TouchableOpacity>
 
-            {/* Device Info Footer */}
-            <View style={styles.footerInfo}>
-              <Ionicons name="hardware-chip-outline" size={14} color={Colors.secondaryText} />
-              <Text style={styles.footerInfoText}>
-                Active session will count toward your device limit (3 max for Standard, 6 max for Pro).
-              </Text>
+            {/* Resend Timer */}
+            <View style={styles.resendRow}>
+              <Text style={styles.resendQuestion}>Didn&apos;t receive the code? </Text>
+              {timer > 0 ? (
+                <Text style={styles.timerText}>Resend in {timer}s</Text>
+              ) : (
+                <TouchableOpacity onPress={handleResend}>
+                  <Text style={styles.resendAction}>Resend Code</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </TouchableWithoutFeedback>
@@ -209,57 +228,53 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background,
   },
-  container: {
+  keyboardView: {
     flex: 1,
   },
-  inner: {
+  content: {
     flex: 1,
     paddingHorizontal: 24,
     paddingTop: 16,
-    paddingBottom: 32,
-    justifyContent: 'space-between',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
-    gap: 14,
+    marginBottom: 28,
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: Colors.border,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#F1F4F8',
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 14,
   },
-  heroSection: {
-    marginBottom: 20,
+  instructionSection: {
+    marginBottom: 28,
   },
-  badgeStep: {
+  badgeShield: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FEE2E2',
+    backgroundColor: '#FFEFEF',
+    alignSelf: 'flex-start',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 8,
-    alignSelf: 'flex-start',
-    gap: 6,
     marginBottom: 12,
+    gap: 6,
   },
-  badgeStepText: {
+  badgeShieldText: {
     fontSize: 11,
     fontWeight: '700',
     color: Colors.primaryRed,
     letterSpacing: 0.5,
   },
   title: {
-    fontSize: 28,
-    fontWeight: '700',
+    fontSize: 26,
+    fontWeight: '800',
     color: Colors.navy,
-    letterSpacing: -0.6,
+    letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 14,
@@ -267,124 +282,83 @@ const styles = StyleSheet.create({
     marginTop: 8,
     lineHeight: 20,
   },
-  boldText: {
-    color: Colors.navy,
-    fontWeight: '600',
-  },
-  demoCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEF3C7',
-    borderWidth: 1,
-    borderColor: '#FDE68A',
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 24,
-    gap: 12,
-  },
-  demoIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  demoTitle: {
-    fontSize: 13,
+  highlightText: {
     fontWeight: '700',
-    color: '#92400E',
-  },
-  demoCode: {
-    fontSize: 12,
-    color: '#B45309',
-    marginTop: 2,
-    fontWeight: '600',
-  },
-  inputContainer: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 13,
-    fontWeight: '600',
     color: Colors.navy,
-    marginBottom: 8,
+  },
+  otpContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
   },
   otpInput: {
+    width: '100%',
+    height: 60,
     backgroundColor: '#FFFFFF',
     borderWidth: 2,
-    borderColor: Colors.primaryRed,
-    borderRadius: 16,
-    fontSize: 28,
-    fontWeight: '700',
+    borderColor: Colors.border,
+    borderRadius: 14,
+    fontSize: 32,
+    fontWeight: '800',
     textAlign: 'center',
-    letterSpacing: 10,
+    letterSpacing: 12,
     color: Colors.navy,
-    height: 64,
   },
   errorBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FEF2F2',
+    backgroundColor: '#FFF5F5',
+    borderWidth: 1,
+    borderColor: '#FED7D7',
     borderRadius: 10,
-    padding: 10,
+    padding: 12,
+    marginBottom: 20,
     gap: 8,
-    marginBottom: 12,
   },
   errorText: {
-    fontSize: 13,
     color: Colors.primaryRed,
+    fontSize: 13,
     fontWeight: '500',
     flex: 1,
   },
-  resendRow: {
-    alignItems: 'center',
-    marginVertical: 14,
-  },
-  timerText: {
-    fontSize: 14,
-    color: Colors.secondaryText,
-  },
-  resendBtnText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.primaryRed,
-  },
   verifyBtn: {
-    backgroundColor: Colors.primaryRed,
-    height: 54,
-    borderRadius: 16,
     flexDirection: 'row',
-    alignItems: 'center',
+    backgroundColor: Colors.primaryRed,
+    height: 52,
+    borderRadius: 14,
     justifyContent: 'center',
-    gap: 8,
+    alignItems: 'center',
     shadowColor: Colors.primaryRed,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 4,
-    marginTop: 10,
   },
   verifyBtnDisabled: {
-    opacity: 0.6,
+    opacity: 0.7,
   },
   verifyBtnText: {
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
-    color: '#FFFFFF',
   },
-  footerInfo: {
+  resendRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    marginTop: 20,
-    paddingHorizontal: 16,
+    alignItems: 'center',
+    marginTop: 24,
   },
-  footerInfoText: {
-    fontSize: 11,
+  resendQuestion: {
+    fontSize: 14,
     color: Colors.secondaryText,
-    textAlign: 'center',
-    lineHeight: 16,
+  },
+  timerText: {
+    fontSize: 14,
+    color: Colors.secondaryText,
+    fontWeight: '600',
+  },
+  resendAction: {
+    fontSize: 14,
+    color: Colors.primaryRed,
+    fontWeight: '700',
   },
 });

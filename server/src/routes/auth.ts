@@ -1,49 +1,314 @@
 import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { query } from '../db';
-import { requireAuth, AuthRequest } from '../middleware/auth';
+import prisma from '../db/prisma';
+import { requireAuth, AuthRequest, getUserPermissions } from '../middleware/auth';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'ezydine_super_secure_jwt_secret_key_2026';
 
-// 1. Send OTP (Step 1 of 2-Step Verification)
-router.post('/send-otp', async (req: Request, res: Response) => {
+// -------------------------------------------------------------
+// 1. REGISTER FLOW: Step 1 - Request OTP for New Registration
+// -------------------------------------------------------------
+router.post('/register', async (req: Request, res: Response) => {
   try {
-    const { identifier } = req.body; // mobile number or email
+    const { fullName, phone, email, restaurantName, location } = req.body;
 
-    if (!identifier || identifier.trim() === '') {
-      return res.status(400).json({ success: false, error: 'Mobile number or email is required' });
-    }
-
-    const cleanIdentifier = identifier.trim();
-
-    // STRICT CHECK: Only registered users / staff are allowed to request OTP and log in
-    const userCheck = await query(
-      `SELECT id, phone FROM users WHERE phone = $1 OR email = $1 LIMIT 1`,
-      [cleanIdentifier]
-    );
-    const staffCheck = await query(
-      `SELECT id, phone FROM staff_members WHERE phone = $1 AND is_active = true LIMIT 1`,
-      [cleanIdentifier]
-    );
-
-    if (userCheck.rows.length === 0 && staffCheck.rows.length === 0) {
-      return res.status(403).json({
+    if (!fullName || !phone || !restaurantName) {
+      return res.status(400).json({
         success: false,
-        error: 'This mobile number is not registered. Please contact support@ezydine.in to create your restaurant account.',
+        error: 'Full name, mobile number, and restaurant name are required.',
       });
     }
 
-    // Generate true random 6-digit OTP
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const cleanPhone = phone.trim();
+    const cleanEmail = email ? email.trim() : null;
 
+    // Check if user already exists
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { phone: cleanPhone },
+          cleanEmail ? { email: cleanEmail } : { phone: cleanPhone },
+        ],
+      },
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        error: 'An account with this phone number or email is already registered. Please proceed to Login.',
+      });
+    }
+
+    // Generate random 6-digit OTP
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes expiry
+
+    await prisma.otpCode.create({
+      data: {
+        identifier: cleanPhone,
+        code,
+        purpose: 'register',
+        expiresAt,
+      },
+    });
+
+    console.log(`[AUTH] Registration OTP generated for ${cleanPhone}: ${code}`);
+
+    return res.json({
+      success: true,
+      message: `Registration verification OTP sent to ${cleanPhone}`,
+      otp: code, // returned for verification / SMS gateway integration
+    });
+  } catch (error) {
+    console.error('Registration OTP error:', error);
+    return res.status(500).json({ success: false, error: 'Failed to initiate registration' });
+  }
+});
+
+// -------------------------------------------------------------
+// 2. REGISTER FLOW: Step 2 - Verify OTP & Create Account
+// -------------------------------------------------------------
+router.post('/verify-register', async (req: Request, res: Response) => {
+  try {
+    const {
+      fullName,
+      phone,
+      email,
+      restaurantName,
+      location,
+      otp,
+      deviceId,
+      deviceName,
+    } = req.body;
+
+    if (!phone || !otp || !fullName || !restaurantName) {
+      return res.status(400).json({
+        success: false,
+        error: 'Phone number, OTP code, name, and restaurant name are required.',
+      });
+    }
+
+    const cleanPhone = phone.trim();
+    const cleanOtp = otp.trim();
+    const cleanEmail = email ? email.trim() : null;
+
+    // Verify OTP in database
+    const otpRecord = await prisma.otpCode.findFirst({
+      where: {
+        identifier: cleanPhone,
+        code: cleanOtp,
+        used: false,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { id: 'desc' },
+    });
+
+    if (!otpRecord) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or expired OTP code. Please request a new OTP.',
+      });
+    }
+
+    // Mark OTP as used
+    await prisma.otpCode.update({
+      where: { id: otpRecord.id },
+      data: { used: true },
+    });
+
+    // Check once more in case of duplicate concurrent submission
+    const existing = await prisma.user.findUnique({
+      where: { phone: cleanPhone },
+    });
+
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        error: 'User already registered. Please proceed to Login.',
+      });
+    }
+
+    const currentDeviceId = deviceId || `device_${Date.now()}`;
+    const currentDeviceName = deviceName || 'Mobile Terminal 1';
+
+    // Execute atomic transaction for new restaurant onboarding
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Create User
+      const user = await tx.user.create({
+        data: {
+          fullName: fullName.trim(),
+          phone: cleanPhone,
+          email: cleanEmail,
+          role: 'owner',
+        },
+      });
+
+      // 2. Create Restaurant Profile
+      const restaurant = await tx.restaurantProfile.create({
+        data: {
+          userId: user.id,
+          name: restaurantName.trim(),
+          location: (location || 'Main Branch').trim(),
+          phone: cleanPhone,
+          gstNumber: '29AABCT1332L1Z4',
+          gstRate: 5.0,
+          thermalPaperWidth: '58mm',
+          kotEnabled: true,
+        },
+      });
+
+      // 3. Link Owner Role
+      const ownerRole = await tx.role.findFirst({
+        where: { name: 'Owner', isSystem: true },
+      });
+
+      if (ownerRole) {
+        await tx.userRole.create({
+          data: {
+            userId: user.id,
+            roleId: ownerRole.id,
+            restaurantId: restaurant.id,
+          },
+        });
+      }
+
+      // 4. Create Staff Member record for the owner
+      await tx.staffMember.create({
+        data: {
+          restaurantId: restaurant.id,
+          name: fullName.trim(),
+          phone: cleanPhone,
+          role: 'Owner',
+          roleId: ownerRole?.id || null,
+          pin: '1234',
+          isActive: true,
+          canEditMenu: true,
+          canAccessReports: true,
+        },
+      });
+
+      // 5. Create 30-Day Starter Subscription
+      const thirtyDays = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      await tx.subscription.create({
+        data: {
+          userId: user.id,
+          planId: 'plan_starter_3000',
+          status: 'active',
+          expiresAt: thirtyDays,
+        },
+      });
+
+      // 6. Register Device
+      await tx.device.upsert({
+        where: {
+          userId_deviceId: {
+            userId: user.id,
+            deviceId: currentDeviceId,
+          },
+        },
+        update: { isActive: true, lastActive: new Date() },
+        create: {
+          userId: user.id,
+          deviceId: currentDeviceId,
+          deviceName: currentDeviceName,
+          platform: 'Mobile',
+          isActive: true,
+        },
+      });
+
+      return { user, restaurant };
+    });
+
+    // Resolve permissions for the new owner
+    const permissions = await getUserPermissions(result.user.id, undefined, result.restaurant.id);
+
+    // Sign JWT
+    const token = jwt.sign(
+      {
+        userId: result.user.id,
+        restaurantId: result.restaurant.id,
+        phone: result.user.phone,
+        email: result.user.email,
+        deviceId: currentDeviceId,
+      },
+      JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Account and restaurant registered successfully',
+      token,
+      user: {
+        id: result.user.id,
+        phone: result.user.phone,
+        email: result.user.email,
+        fullName: result.user.fullName,
+        role: result.user.role,
+      },
+      restaurant: result.restaurant,
+      permissions,
+      plan: {
+        id: 'plan_starter_3000',
+        name: 'Standard Plan',
+        device_limit: 3,
+      },
+      deviceId: currentDeviceId,
+    });
+  } catch (error) {
+    console.error('Verify registration error:', error);
+    return res.status(500).json({ success: false, error: 'Registration failed. Please try again.' });
+  }
+});
+
+// -------------------------------------------------------------
+// 3. LOGIN FLOW: Step 1 - Send OTP (Strictly for registered users)
+// -------------------------------------------------------------
+router.post('/send-otp', async (req: Request, res: Response) => {
+  try {
+    const rawIdentifier = req.body.identifier || req.body.phoneNumber || req.body.phone || req.body.mobile;
+
+    if (!rawIdentifier || typeof rawIdentifier !== 'string' || rawIdentifier.trim() === '') {
+      return res.status(400).json({ success: false, error: 'Mobile number or email is required' });
+    }
+
+    const cleanIdentifier = rawIdentifier.trim();
+
+    // Check if registered user or staff
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [{ phone: cleanIdentifier }, { email: cleanIdentifier }],
+      },
+    });
+
+    const staff = !user
+      ? await prisma.staffMember.findFirst({
+          where: { phone: cleanIdentifier, isActive: true },
+        })
+      : null;
+
+    if (!user && !staff) {
+      return res.status(404).json({
+        success: false,
+        error: 'This account is not registered. Please register your restaurant first.',
+      });
+    }
+
+    // Generate random 6-digit OTP
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-    // Store in database
-    await query(
-      `INSERT INTO otp_codes (identifier, code, expires_at) VALUES ($1, $2, $3)`,
-      [cleanIdentifier, code, expiresAt]
-    );
+    await prisma.otpCode.create({
+      data: {
+        identifier: cleanIdentifier,
+        code,
+        purpose: 'login',
+        expiresAt,
+      },
+    });
+
+    console.log(`[AUTH] Login OTP generated for ${cleanIdentifier}: ${code}`);
 
     return res.json({
       success: true,
@@ -51,132 +316,172 @@ router.post('/send-otp', async (req: Request, res: Response) => {
       otp: code,
     });
   } catch (error) {
-    console.error('Error sending OTP:', error);
+    console.error('Error sending login OTP:', error);
     return res.status(500).json({ success: false, error: 'Failed to send OTP' });
   }
 });
 
-// 2. Verify OTP (Step 2 of 2-Step Verification)
+// -------------------------------------------------------------
+// 4. LOGIN FLOW: Step 2 - Verify OTP & Issue Token
+// -------------------------------------------------------------
 router.post('/verify-otp', async (req: Request, res: Response) => {
   try {
-    const { identifier, otp, deviceId, deviceName } = req.body;
+    const rawIdentifier = req.body.identifier || req.body.phoneNumber || req.body.phone || req.body.mobile;
+    const { otp, deviceId, deviceName } = req.body;
 
-    if (!identifier || !otp) {
+    if (!rawIdentifier || !otp) {
       return res.status(400).json({ success: false, error: 'Identifier and OTP code are required' });
     }
 
-    const cleanIdentifier = identifier.trim();
-    const cleanOtp = otp.trim();
+    const cleanIdentifier = (typeof rawIdentifier === 'string' ? rawIdentifier : String(rawIdentifier)).trim();
+    const cleanOtp = String(otp).trim();
 
-    // Check OTP in database
-    const otpResult = await query(
-      `SELECT * FROM otp_codes 
-       WHERE identifier = $1 AND code = $2 AND used = false AND expires_at > CURRENT_TIMESTAMP 
-       ORDER BY id DESC LIMIT 1`,
-      [cleanIdentifier, cleanOtp]
-    );
+    // Database OTP verification
+    const otpRecord = await prisma.otpCode.findFirst({
+      where: {
+        identifier: cleanIdentifier,
+        code: cleanOtp,
+        used: false,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { id: 'desc' },
+    });
 
-    // Allow master demo code 123456 as well
-    const isMasterDemo = cleanOtp === '123456';
-
-    if (otpResult.rows.length === 0 && !isMasterDemo) {
+    if (!otpRecord) {
       return res.status(400).json({
         success: false,
         error: 'Invalid or expired OTP code. Please check and try again.',
       });
     }
 
-    if (otpResult.rows.length > 0) {
-      await query('UPDATE otp_codes SET used = true WHERE id = $1', [otpResult.rows[0].id]);
-    }
+    // Mark OTP as used immediately
+    await prisma.otpCode.update({
+      where: { id: otpRecord.id },
+      data: { used: true },
+    });
 
-    // STRICT CHECK: Find registered user (DO NOT auto-create unverified accounts)
-    let userResult = await query(
-      `SELECT * FROM users WHERE phone = $1 OR email = $1 LIMIT 1`,
-      [cleanIdentifier]
-    );
+    // Resolve user / staff
+    let user = await prisma.user.findFirst({
+      where: {
+        OR: [{ phone: cleanIdentifier }, { email: cleanIdentifier }],
+      },
+    });
 
-    let user;
-    if (userResult.rows.length === 0) {
-      // Check if user is an active staff member
-      const staffCheck = await query(
-        `SELECT s.*, r.user_id as owner_user_id 
-         FROM staff_members s
-         JOIN restaurant_profile r ON r.id = s.restaurant_id
-         WHERE s.phone = $1 AND s.is_active = true 
-         ORDER BY s.id DESC LIMIT 1`,
-        [cleanIdentifier]
-      );
+    let staffId: number | undefined;
+    let restaurantId: number | undefined;
 
-      if (staffCheck.rows.length === 0) {
+    if (!user) {
+      const staff = await prisma.staffMember.findFirst({
+        where: { phone: cleanIdentifier, isActive: true },
+        include: { restaurant: true },
+      });
+
+      if (!staff) {
         return res.status(404).json({
           success: false,
-          error: 'This account is not registered. Please contact Master Admin to create your restaurant access.',
+          error: 'No active account found for this number.',
         });
       }
 
-      const ownerUser = await query(`SELECT * FROM users WHERE id = $1`, [staffCheck.rows[0].owner_user_id]);
-      if (ownerUser.rows.length > 0) {
-        user = ownerUser.rows[0];
-      } else {
-        return res.status(404).json({
-          success: false,
-          error: 'Restaurant account configuration error. Please contact Master Admin.',
-        });
-      }
-    } else {
-      user = userResult.rows[0];
+      staffId = staff.id;
+      restaurantId = staff.restaurantId;
+      user = await prisma.user.findUnique({
+        where: { id: staff.restaurant.userId },
+      });
     }
 
-    // Fetch active plan
-    const subResult = await query(`
-      SELECT s.id as sub_id, s.status, s.expires_at, p.id as plan_id, p.name as plan_name, p.price, p.device_limit
-      FROM subscriptions s
-      JOIN plans p ON s.plan_id = p.id
-      WHERE s.user_id = $1 AND s.status = 'active'
-      ORDER BY s.id DESC LIMIT 1
-    `, [user.id]);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User account not found.',
+      });
+    }
 
-    const activePlan = subResult.rows[0] || {
-      plan_id: 'plan_starter_3000',
-      plan_name: 'Standard Plan',
-      price: 2999,
-      device_limit: 3,
-    };
+    // Fetch restaurant
+    const restaurant = restaurantId
+      ? await prisma.restaurantProfile.findUnique({ where: { id: restaurantId } })
+      : await prisma.restaurantProfile.findFirst({
+          where: { userId: user.id },
+          orderBy: { id: 'desc' },
+        });
+
+    const activeRestId = restaurant?.id || restaurantId;
+
+    // Fetch subscription plan
+    const sub = await prisma.subscription.findFirst({
+      where: { userId: user.id, status: 'active' },
+      include: { plan: true },
+      orderBy: { id: 'desc' },
+    });
+
+    const activePlan = sub?.plan
+      ? {
+          id: sub.plan.id,
+          name: sub.plan.name,
+          price: sub.plan.price,
+          device_limit: sub.plan.deviceLimit,
+        }
+      : {
+          id: 'plan_starter_3000',
+          name: 'Standard Plan',
+          price: 2999,
+          device_limit: 3,
+        };
 
     const currentDeviceId = deviceId || `device_${Date.now()}`;
     const currentDeviceName = deviceName || 'Mobile Terminal 1';
 
-    // Check device count against active plan limit (3 for 3000 plan, 6 for 6000 plan)
-    const activeDevicesResult = await query(
-      `SELECT * FROM devices WHERE user_id = $1 AND is_active = true`,
-      [user.id]
-    );
+    // Check device limit
+    const activeDevices = await prisma.device.findMany({
+      where: { userId: user.id, isActive: true },
+    });
 
-    const isExistingDevice = activeDevicesResult.rows.some((d) => d.device_id === currentDeviceId);
+    const isExistingDevice = activeDevices.some((d) => d.deviceId === currentDeviceId);
 
-    if (!isExistingDevice && activeDevicesResult.rows.length >= activePlan.device_limit) {
+    if (!isExistingDevice && activeDevices.length >= activePlan.device_limit) {
       return res.status(403).json({
         success: false,
-        error: `Device login limit reached (${activePlan.device_limit} devices max on ${activePlan.plan_name}). Upgrade to Growth Pro Plan for up to 6 devices.`,
+        error: `Device login limit reached (${activePlan.device_limit} devices max on ${activePlan.name}). Upgrade your plan to add more devices.`,
         plan: activePlan,
-        activeDeviceCount: activeDevicesResult.rows.length,
+        activeDeviceCount: activeDevices.length,
       });
     }
 
-    // Register / update device
-    await query(
-      `INSERT INTO devices (user_id, device_id, device_name, is_active, last_active)
-       VALUES ($1, $2, $3, true, CURRENT_TIMESTAMP)
-       ON CONFLICT (user_id, device_id)
-       DO UPDATE SET is_active = true, last_active = CURRENT_TIMESTAMP, device_name = EXCLUDED.device_name`,
-      [user.id, currentDeviceId, currentDeviceName]
+    // Update / register device
+    await prisma.device.upsert({
+      where: {
+        userId_deviceId: {
+          userId: user.id,
+          deviceId: currentDeviceId,
+        },
+      },
+      update: {
+        isActive: true,
+        lastActive: new Date(),
+        deviceName: currentDeviceName,
+      },
+      create: {
+        userId: user.id,
+        deviceId: currentDeviceId,
+        deviceName: currentDeviceName,
+        platform: 'Mobile',
+        isActive: true,
+      },
+    });
+
+    // Resolve dynamic permissions
+    const permissions = await getUserPermissions(
+      user.role === 'owner' ? user.id : undefined,
+      staffId,
+      activeRestId
     );
 
     // Generate JWT token
     const token = jwt.sign(
       {
         userId: user.id,
+        staffId,
+        restaurantId: activeRestId,
         phone: user.phone,
         email: user.email,
         deviceId: currentDeviceId,
@@ -185,53 +490,67 @@ router.post('/verify-otp', async (req: Request, res: Response) => {
       { expiresIn: '30d' }
     );
 
-    // Fetch latest restaurant details
-    const restResult = await query(
-      `SELECT * FROM restaurant_profile WHERE user_id = $1 ORDER BY id DESC LIMIT 1`,
-      [user.id]
-    );
-
     return res.json({
       success: true,
-      message: 'Two-step authentication verified successfully',
+      message: 'Authentication verified successfully',
       token,
       user: {
         id: user.id,
         phone: user.phone,
         email: user.email,
-        fullName: user.full_name,
-        role: user.role,
+        fullName: user.fullName,
+        role: staffId ? 'staff' : user.role,
       },
-      restaurant: restResult.rows[0] || null,
+      restaurant,
+      permissions,
       plan: activePlan,
       deviceId: currentDeviceId,
     });
   } catch (error) {
-    console.error('Error verifying OTP:', error);
+    console.error('Error verifying login OTP:', error);
     return res.status(500).json({ success: false, error: 'OTP verification failed' });
   }
 });
 
-// 3. Current User Profile (/api/auth/me)
+// -------------------------------------------------------------
+// 5. Current Authenticated Profile (/api/auth/me)
+// -------------------------------------------------------------
 router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     const user = req.user!;
-    const restResult = await query(
-      `SELECT * FROM restaurant_profile WHERE user_id = $1 ORDER BY id DESC LIMIT 1`,
-      [user.id]
-    );
+    const restaurantId = req.restaurantId;
 
-    const devicesResult = await query(
-      `SELECT device_id, device_name, platform, last_active, is_active FROM devices WHERE user_id = $1 AND is_active = true`,
-      [user.id]
+    const restaurant = restaurantId
+      ? await prisma.restaurantProfile.findUnique({ where: { id: restaurantId } })
+      : await prisma.restaurantProfile.findFirst({
+          where: { userId: user.id },
+          orderBy: { id: 'desc' },
+        });
+
+    const activeDevices = await prisma.device.findMany({
+      where: { userId: user.id, isActive: true },
+      select: {
+        deviceId: true,
+        deviceName: true,
+        platform: true,
+        lastActive: true,
+        isActive: true,
+      },
+    });
+
+    const permissions = await getUserPermissions(
+      user.role === 'owner' ? user.id : undefined,
+      req.staffId,
+      restaurantId
     );
 
     return res.json({
       success: true,
       user,
-      restaurant: restResult.rows[0],
+      restaurant,
+      permissions,
       plan: req.plan,
-      activeDevices: devicesResult.rows,
+      activeDevices,
       currentDeviceId: req.deviceId,
     });
   } catch (error) {
@@ -240,43 +559,50 @@ router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
   }
 });
 
-// 4. Manager Web Portal Direct Login (/api/auth/manager-login)
+// -------------------------------------------------------------
+// 6. Manager / Staff Direct Login (/api/auth/manager-login)
+// -------------------------------------------------------------
 router.post('/manager-login', async (req: Request, res: Response) => {
   try {
-    const { identifier, pin } = req.body;
+    const rawIdentifier = req.body.identifier || req.body.phoneNumber || req.body.phone || req.body.mobile;
+    const { pin } = req.body;
 
-    if (!identifier || !pin) {
-      return res.status(400).json({ success: false, error: 'Identifier (phone/email) and Manager PIN are required.' });
+    if (!rawIdentifier || !pin) {
+      return res.status(400).json({
+        success: false,
+        error: 'Identifier (phone/email) and PIN are required.',
+      });
     }
 
-    const cleanIdentifier = identifier.trim();
-    const cleanPin = pin.trim();
+    const cleanIdentifier = (typeof rawIdentifier === 'string' ? rawIdentifier : String(rawIdentifier)).trim();
+    const cleanPin = String(pin).trim();
 
-    // 1. Look up staff member created in Mobile App Staff Management
-    const staffRes = await query(`
-      SELECT s.*, r.id as rest_id, r.name as restaurant_name, r.location as restaurant_location, r.phone as restaurant_phone, r.gst_number, r.fssai
-      FROM staff_members s
-      JOIN restaurant_profile r ON s.restaurant_id = r.id
-      WHERE (s.phone = $1 OR s.phone LIKE '%' || $1) AND s.pin = $2 AND s.is_active = true
-      LIMIT 1
-    `, [cleanIdentifier, cleanPin]);
+    // 1. Check Staff Member
+    const staff = await prisma.staffMember.findFirst({
+      where: {
+        phone: cleanIdentifier,
+        pin: cleanPin,
+        isActive: true,
+      },
+      include: {
+        restaurant: true,
+        roleRef: {
+          include: {
+            rolePermissions: {
+              include: { permission: true },
+            },
+          },
+        },
+      },
+    });
 
-    if (staffRes.rows.length > 0) {
-      const staff = staffRes.rows[0];
-
-      // Validate role permissions
-      const roleLower = staff.role.toLowerCase();
-      if (roleLower !== 'manager' && roleLower !== 'owner') {
-        return res.status(403).json({
-          success: false,
-          error: `Account for ${staff.name} has role '${staff.role}'. Only Manager or Owner roles can access this POS portal.`,
-        });
-      }
+    if (staff) {
+      const permissions = await getUserPermissions(undefined, staff.id, staff.restaurantId);
 
       const token = jwt.sign(
         {
           staffId: staff.id,
-          restaurantId: staff.rest_id,
+          restaurantId: staff.restaurantId,
           role: staff.role,
         },
         JWT_SECRET,
@@ -292,32 +618,30 @@ router.post('/manager-login', async (req: Request, res: Response) => {
           role: staff.role,
           phone: staff.phone,
         },
-        restaurant: {
-          id: staff.rest_id,
-          name: staff.restaurant_name,
-          location: staff.restaurant_location,
-          phone: staff.restaurant_phone,
-          gstNumber: staff.gst_number,
-          fssai: staff.fssai,
-        },
+        permissions,
+        restaurant: staff.restaurant,
       });
     }
 
-    // 2. Check if owner phone is logging in directly
-    const ownerRes = await query(`
-      SELECT u.*, r.id as rest_id, r.name as restaurant_name, r.location as restaurant_location, r.phone as restaurant_phone
-      FROM users u
-      JOIN restaurant_profile r ON r.user_id = u.id
-      WHERE (u.phone = $1 OR u.email = $1)
-      LIMIT 1
-    `, [cleanIdentifier]);
+    // 2. Check Owner
+    const owner = await prisma.user.findFirst({
+      where: {
+        OR: [{ phone: cleanIdentifier }, { email: cleanIdentifier }],
+      },
+      include: {
+        restaurants: { orderBy: { id: 'desc' }, take: 1 },
+      },
+    });
 
-    if (ownerRes.rows.length > 0 && cleanPin.length === 4) {
-      const owner = ownerRes.rows[0];
+    // Owner with 4-digit PIN default '1234'
+    if (owner && cleanPin.length === 4) {
+      const restaurant = owner.restaurants[0] || null;
+      const permissions = await getUserPermissions(owner.id, undefined, restaurant?.id);
+
       const token = jwt.sign(
         {
           userId: owner.id,
-          restaurantId: owner.rest_id,
+          restaurantId: restaurant?.id,
           role: 'owner',
         },
         JWT_SECRET,
@@ -329,37 +653,35 @@ router.post('/manager-login', async (req: Request, res: Response) => {
         token,
         manager: {
           id: owner.id,
-          name: owner.full_name,
-          role: 'Owner / Manager',
+          name: owner.fullName,
+          role: 'Owner',
           phone: owner.phone,
         },
-        restaurant: {
-          id: owner.rest_id,
-          name: owner.restaurant_name,
-          location: owner.restaurant_location,
-          phone: owner.restaurant_phone,
-        },
+        permissions,
+        restaurant,
       });
     }
 
     return res.status(401).json({
       success: false,
-      error: 'Manager credentials not found. Please have the restaurant owner create your Manager account with your mobile number and 4-digit PIN in the mobile app Staff Management.',
+      error: 'Invalid credentials. Please verify your registered phone number and PIN.',
     });
   } catch (error) {
     console.error('Error during manager login:', error);
-    return res.status(500).json({ success: false, error: 'Manager login failed.' });
+    return res.status(500).json({ success: false, error: 'Login failed.' });
   }
 });
 
-// 5. Logout (Unregister device)
+// -------------------------------------------------------------
+// 7. Logout (Deactivate device)
+// -------------------------------------------------------------
 router.post('/logout', requireAuth, async (req: AuthRequest, res: Response) => {
   try {
     if (req.user && req.deviceId) {
-      await query(
-        `UPDATE devices SET is_active = false WHERE user_id = $1 AND device_id = $2`,
-        [req.user.id, req.deviceId]
-      );
+      await prisma.device.updateMany({
+        where: { userId: req.user.id, deviceId: req.deviceId },
+        data: { isActive: false },
+      });
     }
     return res.json({ success: true, message: 'Logged out successfully' });
   } catch (error) {

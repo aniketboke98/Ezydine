@@ -7,7 +7,7 @@ export const LOCAL_DEV_URL = Platform.select({
   default: 'http://localhost:5001/api',
 });
 
-let currentBaseUrl = PRIMARY_URL;
+let currentBaseUrl = __DEV__ ? (LOCAL_DEV_URL || PRIMARY_URL) : PRIMARY_URL;
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 15000): Promise<Response> {
   const controller = new AbortController();
@@ -27,6 +27,7 @@ const USER_KEY = '@ezydine_user_data';
 const RESTAURANT_KEY = '@ezydine_restaurant_data';
 const PLAN_KEY = '@ezydine_plan_data';
 const DEVICE_KEY = '@ezydine_device_id';
+const PERMISSIONS_KEY = '@ezydine_permissions';
 
 // Memory fallback in case native AsyncStorage module is not linked in running binary
 const memoryStore = new Map<string, string>();
@@ -104,7 +105,7 @@ class ApiService {
     return this.deviceId || 'terminal_main';
   }
 
-  async saveAuth(data: { token: string; user: any; restaurant?: any; plan?: any; deviceId?: string }) {
+  async saveAuth(data: { token: string; user: any; restaurant?: any; plan?: any; permissions?: string[]; deviceId?: string }) {
     this.token = data.token;
     if (data.deviceId) {
       this.deviceId = data.deviceId;
@@ -114,11 +115,12 @@ class ApiService {
     if (data.user) await safeStorage.setItem(USER_KEY, JSON.stringify(data.user));
     if (data.restaurant) await safeStorage.setItem(RESTAURANT_KEY, JSON.stringify(data.restaurant));
     if (data.plan) await safeStorage.setItem(PLAN_KEY, JSON.stringify(data.plan));
+    if (data.permissions) await safeStorage.setItem(PERMISSIONS_KEY, JSON.stringify(data.permissions));
   }
 
   async clearAuth() {
     this.token = null;
-    await safeStorage.multiRemove([TOKEN_KEY, USER_KEY, RESTAURANT_KEY, PLAN_KEY]);
+    await safeStorage.multiRemove([TOKEN_KEY, USER_KEY, RESTAURANT_KEY, PLAN_KEY, PERMISSIONS_KEY]);
   }
 
   async getRestaurant(): Promise<any | null> {
@@ -141,6 +143,25 @@ class ApiService {
     }
   }
 
+  async getPermissions(): Promise<string[]> {
+    const raw = await safeStorage.getItem(PERMISSIONS_KEY);
+    if (!raw) return [];
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+
+  async hasPermission(permissionCode: string): Promise<boolean> {
+    const user = await this.getUser();
+    if (user && user.role && user.role.toLowerCase() === 'owner') {
+      return true;
+    }
+    const perms = await this.getPermissions();
+    return perms.includes(permissionCode);
+  }
+
   private async request(endpoint: string, options: RequestInit = {}): Promise<any> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -155,7 +176,7 @@ class ApiService {
       const response = await fetchWithTimeout(`${baseUrl}${endpoint}`, {
         ...options,
         headers,
-      }, 5000);
+      }, 15000);
 
       const data = await response.json().catch(() => ({}));
 
@@ -195,6 +216,35 @@ class ApiService {
 
   // 1. Auth & Two-Step Verification
   auth = {
+    // Separate Registration Flow
+    register: async (payload: { fullName: string; phone: string; email?: string; restaurantName: string; location?: string }) => {
+      return this.request('/auth/register', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    },
+
+    verifyRegister: async (payload: {
+      fullName: string;
+      phone: string;
+      email?: string;
+      restaurantName: string;
+      location?: string;
+      otp: string;
+      deviceName?: string;
+    }) => {
+      const deviceId = this.getDeviceId();
+      const res = await this.request('/auth/verify-register', {
+        method: 'POST',
+        body: JSON.stringify({ ...payload, deviceId }),
+      });
+      if (res.success && res.token) {
+        await this.saveAuth(res);
+      }
+      return res;
+    },
+
+    // Strict Login Flow
     sendOtp: async (identifier: string) => {
       return this.request('/auth/send-otp', {
         method: 'POST',
@@ -215,7 +265,11 @@ class ApiService {
     },
 
     getMe: async () => {
-      return this.request('/auth/me');
+      const res = await this.request('/auth/me');
+      if (res.success && res.permissions) {
+        await safeStorage.setItem(PERMISSIONS_KEY, JSON.stringify(res.permissions));
+      }
+      return res;
     },
 
     logout: async () => {

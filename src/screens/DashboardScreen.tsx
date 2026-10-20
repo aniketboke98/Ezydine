@@ -48,6 +48,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const [salesTimeframe, setSalesTimeframe] = useState<'1day' | '7days' | '30days'>('1day');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [isOwner, setIsOwner] = useState(true);
+
+  const hasPerm = (required: string | string[]) => {
+    if (isOwner) return true;
+    if (Array.isArray(required)) {
+      return required.some((r) => permissions.includes(r));
+    }
+    return permissions.includes(required);
+  };
 
   // Real Database Metrics (Initialized strictly to 0, NO fake data)
   const [stats, setStats] = useState({
@@ -76,7 +86,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const loadAllData = async () => {
     try {
-      // 0. Instant cached restaurant info
+      // 0. Permissions & user role
+      const user = await api.getUser().catch(() => null);
+      const perms = await api.getPermissions().catch(() => []);
+      const ownerCheck = !user || !user.role || user.role.toLowerCase() === 'owner';
+      setIsOwner(ownerCheck);
+      setPermissions(perms || []);
+
+      // Instant cached restaurant info
       const cached = await api.getRestaurant().catch(() => null);
       if (cached && (cached.name || cached.restaurant_name)) {
         setRestaurantProfile({
@@ -206,316 +223,332 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         {/* ======================================================== */}
         {/* REAL SALES & ORDERS ANALYTICS (1 Day, 7 Days, 30 Days)   */}
         {/* ======================================================== */}
-        <View style={styles.salesHeroCard}>
-          {/* Timeframe Switcher Tabs */}
-          <View style={styles.timeframeRow}>
-            <TouchableOpacity
-              style={[styles.timeframeTab, salesTimeframe === '1day' && styles.timeframeTabActive]}
-              onPress={() => setSalesTimeframe('1day')}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.timeframeTabText, salesTimeframe === '1day' && styles.timeframeTabTextActive]}>
-                Today (1 Day)
-              </Text>
-            </TouchableOpacity>
+        {hasPerm('VIEW_REPORTS') && (
+          <View style={styles.salesHeroCard}>
+            {/* Timeframe Switcher Tabs */}
+            <View style={styles.timeframeRow}>
+              <TouchableOpacity
+                style={[styles.timeframeTab, salesTimeframe === '1day' && styles.timeframeTabActive]}
+                onPress={() => setSalesTimeframe('1day')}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.timeframeTabText, salesTimeframe === '1day' && styles.timeframeTabTextActive]}>
+                  Today (1 Day)
+                </Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.timeframeTab, salesTimeframe === '7days' && styles.timeframeTabActive]}
-              onPress={() => setSalesTimeframe('7days')}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.timeframeTabText, salesTimeframe === '7days' && styles.timeframeTabTextActive]}>
-                Last 7 Days
-              </Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.timeframeTab, salesTimeframe === '7days' && styles.timeframeTabActive]}
+                onPress={() => setSalesTimeframe('7days')}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.timeframeTabText, salesTimeframe === '7days' && styles.timeframeTabTextActive]}>
+                  Last 7 Days
+                </Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.timeframeTab, salesTimeframe === '30days' && styles.timeframeTabActive]}
-              onPress={() => setSalesTimeframe('30days')}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.timeframeTabText, salesTimeframe === '30days' && styles.timeframeTabTextActive]}>
-                Last 30 Days
-              </Text>
-            </TouchableOpacity>
-          </View>
+              <TouchableOpacity
+                style={[styles.timeframeTab, salesTimeframe === '30days' && styles.timeframeTabActive]}
+                onPress={() => setSalesTimeframe('30days')}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.timeframeTabText, salesTimeframe === '30days' && styles.timeframeTabTextActive]}>
+                  Last 30 Days
+                </Text>
+              </TouchableOpacity>
+            </View>
 
-          {/* Sales & Orders Metric Values */}
-          <View style={styles.salesMetricsRow}>
-            <View style={styles.metricBlock}>
-              <Text style={styles.metricLabel}>{timeframeLabel}</Text>
-              <Text style={styles.metricBigValue}>
-                ₹{displayedSales.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </Text>
-              {salesTimeframe === '1day' && (
-                <View style={styles.growthBadge}>
-                  <Ionicons name="trending-up" size={13} color={Colors.successGreen} />
-                  <Text style={styles.growthText}>{stats.salesGrowth} vs yesterday</Text>
+            {/* Sales & Orders Metric Values */}
+            <View style={styles.salesMetricsRow}>
+              <View style={styles.metricBlock}>
+                <Text style={styles.metricLabel}>{timeframeLabel}</Text>
+                <Text style={styles.metricBigValue}>
+                  ₹{displayedSales.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </Text>
+                {salesTimeframe === '1day' && (
+                  <View style={styles.growthBadge}>
+                    <Ionicons name="trending-up" size={13} color={Colors.successGreen} />
+                    <Text style={styles.growthText}>{stats.salesGrowth} vs yesterday</Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.metricDivider} />
+
+              <View style={styles.metricBlock}>
+                <Text style={styles.metricLabel}>Total Orders</Text>
+                <Text style={styles.metricBigValue}>{displayedOrders}</Text>
+                <Text style={styles.ordersSubText}>
+                  {displayedOrders > 0
+                    ? `Avg. ₹${(displayedSales / displayedOrders).toFixed(0)} / order`
+                    : '0 orders recorded'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Real Bar Chart for Daily Sales */}
+            {stats.salesSummary.length > 0 && (
+              <View style={styles.chartContainer}>
+                <View style={styles.chartTitleRow}>
+                  <Text style={styles.chartTitle}>Daily Sales Trend</Text>
+                  <Text style={styles.chartSub}>Real Database Sums</Text>
                 </View>
-              )}
-            </View>
 
-            <View style={styles.metricDivider} />
-
-            <View style={styles.metricBlock}>
-              <Text style={styles.metricLabel}>Total Orders</Text>
-              <Text style={styles.metricBigValue}>{displayedOrders}</Text>
-              <Text style={styles.ordersSubText}>
-                {displayedOrders > 0
-                  ? `Avg. ₹${(displayedSales / displayedOrders).toFixed(0)} / order`
-                  : '0 orders recorded'}
-              </Text>
-            </View>
-          </View>
-
-          {/* Real Bar Chart for Daily Sales */}
-          {stats.salesSummary.length > 0 && (
-            <View style={styles.chartContainer}>
-              <View style={styles.chartTitleRow}>
-                <Text style={styles.chartTitle}>Daily Sales Trend</Text>
-                <Text style={styles.chartSub}>Real Database Sums</Text>
-              </View>
-
-              <View style={styles.barsRow}>
-                {stats.salesSummary.map((item, idx) => {
-                  const ratio = maxChartAmount > 0 ? item.amount / maxChartAmount : 0;
-                  const barHeight = Math.max(8, ratio * 58);
-                  return (
-                    <View key={idx} style={styles.barItem}>
-                      <View style={styles.barTrack}>
-                        <View
-                          style={[
-                            styles.barFill,
-                            {
-                              height: barHeight,
-                              backgroundColor: item.isHighlight ? Colors.primaryRed : '#CBD5E1',
-                            },
-                          ]}
-                        />
+                <View style={styles.barsRow}>
+                  {stats.salesSummary.map((item, idx) => {
+                    const ratio = maxChartAmount > 0 ? item.amount / maxChartAmount : 0;
+                    const barHeight = Math.max(8, ratio * 58);
+                    return (
+                      <View key={idx} style={styles.barItem}>
+                        <View style={styles.barTrack}>
+                          <View
+                            style={[
+                              styles.barFill,
+                              {
+                                height: barHeight,
+                                backgroundColor: item.isHighlight ? Colors.primaryRed : '#CBD5E1',
+                              },
+                            ]}
+                          />
+                        </View>
+                        <Text style={[styles.barDayText, item.isHighlight && styles.barDayHighlight]}>
+                          {item.day.split(' ')[0]}
+                        </Text>
                       </View>
-                      <Text style={[styles.barDayText, item.isHighlight && styles.barDayHighlight]}>
-                        {item.day.split(' ')[0]}
-                      </Text>
-                    </View>
-                  );
-                })}
+                    );
+                  })}
+                </View>
               </View>
-            </View>
-          )}
-        </View>
+            )}
+          </View>
+        )}
 
         {/* Primary Start Quick Billing Button */}
-        <TouchableOpacity
-          style={styles.startBillingBtn}
-          onPress={() => onStartBilling()}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="receipt" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
-          <Text style={styles.startBillingText}>Start Quick Billing</Text>
-          <Ionicons name="arrow-forward" size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
-        </TouchableOpacity>
+        {hasPerm('CREATE_BILL') && (
+          <TouchableOpacity
+            style={styles.startBillingBtn}
+            onPress={() => onStartBilling()}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="receipt" size={20} color="#FFFFFF" style={{ marginRight: 8 }} />
+            <Text style={styles.startBillingText}>Start Quick Billing</Text>
+            <Ionicons name="arrow-forward" size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
+          </TouchableOpacity>
+        )}
 
         {/* ======================================================== */}
         {/* QUICK ACTIONS ROW: Tables, Staff & Attendance, Reports    */}
         {/* ======================================================== */}
         <View style={styles.quickActionsGrid}>
           {/* Tables */}
-          <TouchableOpacity
-            style={styles.quickActionCard}
-            onPress={onNavigateTables}
-            activeOpacity={0.8}
-          >
-            <View style={[styles.quickActionIconWrap, { backgroundColor: '#EFF6FF' }]}>
-              <MaterialCommunityIcons name="table-furniture" size={22} color="#2563EB" />
-            </View>
-            <Text style={styles.quickActionTitle}>Tables</Text>
-            <Text style={styles.quickActionSub}>
-              {stats.activeTablesCount} Occupied · {stats.availableTablesCount || freeTables.length} Free
-            </Text>
-          </TouchableOpacity>
+          {hasPerm('VIEW_TABLES') && (
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={onNavigateTables}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.quickActionIconWrap, { backgroundColor: '#EFF6FF' }]}>
+                <MaterialCommunityIcons name="table-furniture" size={22} color="#2563EB" />
+              </View>
+              <Text style={styles.quickActionTitle}>Tables</Text>
+              <Text style={styles.quickActionSub}>
+                {stats.activeTablesCount} Occupied · {stats.availableTablesCount || freeTables.length} Free
+              </Text>
+            </TouchableOpacity>
+          )}
 
-          {/* Staff & Attendance ("adding employe" & "attentace") */}
-          <TouchableOpacity
-            style={styles.quickActionCard}
-            onPress={onNavigateStaffAttendance}
-            activeOpacity={0.8}
-          >
-            <View style={[styles.quickActionIconWrap, { backgroundColor: '#FEF2F2' }]}>
-              <Ionicons name="people" size={22} color={Colors.primaryRed} />
-            </View>
-            <Text style={styles.quickActionTitle}>Staff & Attendance</Text>
-            <Text style={styles.quickActionSub}>Manage Staff & Check-ins</Text>
-          </TouchableOpacity>
+          {/* Staff & Attendance */}
+          {hasPerm('VIEW_STAFF') && (
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={onNavigateStaffAttendance}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.quickActionIconWrap, { backgroundColor: '#FEF2F2' }]}>
+                <Ionicons name="people" size={22} color={Colors.primaryRed} />
+              </View>
+              <Text style={styles.quickActionTitle}>Staff & Attendance</Text>
+              <Text style={styles.quickActionSub}>Manage Staff & Check-ins</Text>
+            </TouchableOpacity>
+          )}
 
           {/* Kitchen Orders */}
-          <TouchableOpacity
-            style={styles.quickActionCard}
-            onPress={onNavigateKitchen}
-            activeOpacity={0.8}
-          >
-            <View style={[styles.quickActionIconWrap, { backgroundColor: '#FFFBEB' }]}>
-              <MaterialCommunityIcons name="chef-hat" size={22} color="#D97706" />
-            </View>
-            <Text style={styles.quickActionTitle}>Kitchen KOT</Text>
-            <Text style={styles.quickActionSub}>Live Orders Queue</Text>
-          </TouchableOpacity>
+          {hasPerm('VIEW_KOT') && (
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={onNavigateKitchen}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.quickActionIconWrap, { backgroundColor: '#FFFBEB' }]}>
+                <MaterialCommunityIcons name="chef-hat" size={22} color="#D97706" />
+              </View>
+              <Text style={styles.quickActionTitle}>Kitchen KOT</Text>
+              <Text style={styles.quickActionSub}>Live Orders Queue</Text>
+            </TouchableOpacity>
+          )}
 
           {/* Reports */}
-          <TouchableOpacity
-            style={styles.quickActionCard}
-            onPress={onNavigateReports}
-            activeOpacity={0.8}
-          >
-            <View style={[styles.quickActionIconWrap, { backgroundColor: '#F0FDF4' }]}>
-              <Ionicons name="bar-chart" size={22} color={Colors.successGreen} />
-            </View>
-            <Text style={styles.quickActionTitle}>Reports</Text>
-            <Text style={styles.quickActionSub}>1d · 7d · 30d Analytics</Text>
-          </TouchableOpacity>
+          {hasPerm('VIEW_REPORTS') && (
+            <TouchableOpacity
+              style={styles.quickActionCard}
+              onPress={onNavigateReports}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.quickActionIconWrap, { backgroundColor: '#F0FDF4' }]}>
+                <Ionicons name="bar-chart" size={22} color={Colors.successGreen} />
+              </View>
+              <Text style={styles.quickActionTitle}>Reports</Text>
+              <Text style={styles.quickActionSub}>1d · 7d · 30d Analytics</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* ======================================================== */}
         {/* TABLE OPTION: WHICH IS OCCUPIED & WHICH IS FREE          */}
         {/* ======================================================== */}
-        <View style={styles.tablesSectionCard}>
-          <View style={styles.tablesSectionHeader}>
-            <View>
-              <Text style={styles.tablesSectionTitle}>Live Tables Status</Text>
-              <Text style={styles.tablesSectionSub}>
-                {occupiedTables.length} Occupied · {freeTables.length} Free & Available
-              </Text>
+        {hasPerm('VIEW_TABLES') && (
+          <View style={styles.tablesSectionCard}>
+            <View style={styles.tablesSectionHeader}>
+              <View>
+                <Text style={styles.tablesSectionTitle}>Live Tables Status</Text>
+                <Text style={styles.tablesSectionSub}>
+                  {occupiedTables.length} Occupied · {freeTables.length} Free & Available
+                </Text>
+              </View>
+
+              <TouchableOpacity onPress={onNavigateTables} activeOpacity={0.7}>
+                <Text style={styles.viewAllTablesText}>View All Floor</Text>
+              </TouchableOpacity>
             </View>
 
-            <TouchableOpacity onPress={onNavigateTables} activeOpacity={0.7}>
-              <Text style={styles.viewAllTablesText}>View All Floor</Text>
-            </TouchableOpacity>
-          </View>
+            {/* Summary Indicator Counters */}
+            <View style={styles.tableStatusPillsRow}>
+              <View style={[styles.tablePillBadge, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}>
+                <View style={[styles.pillDot, { backgroundColor: '#DC2626' }]} />
+                <Text style={[styles.pillText, { color: '#DC2626' }]}>
+                  {occupiedTables.length} Occupied
+                </Text>
+              </View>
 
-          {/* Summary Indicator Counters */}
-          <View style={styles.tableStatusPillsRow}>
-            <View style={[styles.tablePillBadge, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}>
-              <View style={[styles.pillDot, { backgroundColor: '#DC2626' }]} />
-              <Text style={[styles.pillText, { color: '#DC2626' }]}>
-                {occupiedTables.length} Occupied
-              </Text>
+              <View style={[styles.tablePillBadge, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}>
+                <View style={[styles.pillDot, { backgroundColor: Colors.successGreen }]} />
+                <Text style={[styles.pillText, { color: Colors.successGreen }]}>
+                  {freeTables.length} Free (Ready)
+                </Text>
+              </View>
             </View>
 
-            <View style={[styles.tablePillBadge, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}>
-              <View style={[styles.pillDot, { backgroundColor: Colors.successGreen }]} />
-              <Text style={[styles.pillText, { color: Colors.successGreen }]}>
-                {freeTables.length} Free (Ready)
-              </Text>
-            </View>
-          </View>
+            {/* Live Horizontal Scrollable Table Chips */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tableChipsScroll}>
+              {tablesList.map((t) => {
+                const isOccupied = t.status === 'occupied';
+                return (
+                  <TouchableOpacity
+                    key={t.id}
+                    style={[
+                      styles.tableChip,
+                      isOccupied ? styles.tableChipOccupied : styles.tableChipFree,
+                    ]}
+                    onPress={() => {
+                      if (isOccupied) {
+                        onNavigateTables();
+                      } else {
+                        onStartBilling(t.tableNumber);
+                      }
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.tableChipHeader}>
+                      <Text style={[styles.tableChipNumber, isOccupied && { color: '#DC2626' }]}>
+                        {t.tableNumber}
+                      </Text>
+                      <View
+                        style={[
+                          styles.chipStatusDot,
+                          { backgroundColor: isOccupied ? '#DC2626' : Colors.successGreen },
+                        ]}
+                      />
+                    </View>
 
-          {/* Live Horizontal Scrollable Table Chips */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tableChipsScroll}>
-            {tablesList.map((t) => {
-              const isOccupied = t.status === 'occupied';
-              return (
-                <TouchableOpacity
-                  key={t.id}
-                  style={[
-                    styles.tableChip,
-                    isOccupied ? styles.tableChipOccupied : styles.tableChipFree,
-                  ]}
-                  onPress={() => {
-                    if (isOccupied) {
-                      onNavigateTables();
-                    } else {
-                      onStartBilling(t.tableNumber);
-                    }
-                  }}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.tableChipHeader}>
-                    <Text style={[styles.tableChipNumber, isOccupied && { color: '#DC2626' }]}>
-                      {t.tableNumber}
+                    <Text style={styles.tableChipStatus}>
+                      {isOccupied ? 'Occupied' : 'Free'}
                     </Text>
-                    <View
-                      style={[
-                        styles.chipStatusDot,
-                        { backgroundColor: isOccupied ? '#DC2626' : Colors.successGreen },
-                      ]}
-                    />
-                  </View>
 
-                  <Text style={styles.tableChipStatus}>
-                    {isOccupied ? 'Occupied' : 'Free'}
-                  </Text>
-
-                  {isOccupied ? (
-                    <Text style={styles.tableChipAmount}>₹{t.activeAmount.toFixed(0)}</Text>
-                  ) : (
-                    <Text style={styles.tableChipAction}>+ Tap to Bill</Text>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
+                    {isOccupied ? (
+                      <Text style={styles.tableChipAmount}>₹{t.activeAmount.toFixed(0)}</Text>
+                    ) : (
+                      <Text style={styles.tableChipAction}>+ Tap to Bill</Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
 
         {/* ======================================================== */}
         {/* RECENT SETTLED BILLS (Real from PostgreSQL)              */}
         {/* ======================================================== */}
-        <View style={styles.recentSection}>
-          <View style={styles.recentHeader}>
-            <Text style={styles.recentTitle}>Recent Bills</Text>
-            <TouchableOpacity onPress={onNavigateReports} activeOpacity={0.7}>
-              <Text style={styles.viewAllText}>View All ({stats.billsCount})</Text>
-            </TouchableOpacity>
-          </View>
-
-          {recentBills.length === 0 ? (
-            <View style={styles.emptyBillsCard}>
-              <Ionicons name="receipt-outline" size={32} color="#94A3B8" />
-              <Text style={styles.emptyBillsTitle}>No Bills Generated Today</Text>
-              <Text style={styles.emptyBillsSub}>
-                Start quick billing on any free table to create real bills.
-              </Text>
+        {hasPerm('VIEW_BILLS') && (
+          <View style={styles.recentSection}>
+            <View style={styles.recentHeader}>
+              <Text style={styles.recentTitle}>Recent Bills</Text>
+              <TouchableOpacity onPress={onNavigateReports} activeOpacity={0.7}>
+                <Text style={styles.viewAllText}>View All ({stats.billsCount})</Text>
+              </TouchableOpacity>
             </View>
-          ) : (
-            <View style={styles.billsListCard}>
-              {recentBills.map((b, idx) => (
-                <View
-                  key={b.id || idx}
-                  style={[
-                    styles.billRow,
-                    idx < recentBills.length - 1 && styles.billRowBorder,
-                  ]}
-                >
-                  <View style={styles.billRowLeft}>
-                    <Text style={styles.billNumberText}>
-                      {b.billNumber} · Table {b.tableOrType}
-                    </Text>
-                    <Text style={styles.billMetaText}>
-                      {b.paymentMethod || 'Cash'} · {b.time || 'Today'}
-                    </Text>
-                  </View>
 
-                  <View style={styles.billRowRight}>
-                    <Text style={styles.billAmountText}>₹{parseFloat(b.amount || 0).toFixed(2)}</Text>
-                    <View
-                      style={[
-                        styles.paymentStatusBadge,
-                        b.paymentStatus === 'paid' ? styles.paidBadge : styles.unpaidBadge,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.paymentStatusText,
-                          b.paymentStatus === 'paid' ? { color: Colors.successGreen } : { color: '#DC2626' },
-                        ]}
-                      >
-                        {(b.paymentStatus || 'unpaid').toUpperCase()}
+            {recentBills.length === 0 ? (
+              <View style={styles.emptyBillsCard}>
+                <Ionicons name="receipt-outline" size={32} color="#94A3B8" />
+                <Text style={styles.emptyBillsTitle}>No Bills Generated Today</Text>
+                <Text style={styles.emptyBillsSub}>
+                  Start quick billing on any free table to create real bills.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.billsListCard}>
+                {recentBills.map((b, idx) => (
+                  <View
+                    key={b.id || idx}
+                    style={[
+                      styles.billRow,
+                      idx < recentBills.length - 1 && styles.billRowBorder,
+                    ]}
+                  >
+                    <View style={styles.billRowLeft}>
+                      <Text style={styles.billNumberText}>
+                        {b.billNumber} · Table {b.tableOrType}
+                      </Text>
+                      <Text style={styles.billMetaText}>
+                        {b.paymentMethod || 'Cash'} · {b.time || 'Today'}
                       </Text>
                     </View>
+
+                    <View style={styles.billRowRight}>
+                      <Text style={styles.billAmountText}>₹{parseFloat(b.amount || 0).toFixed(2)}</Text>
+                      <View
+                        style={[
+                          styles.paymentStatusBadge,
+                          b.paymentStatus === 'paid' ? styles.paidBadge : styles.unpaidBadge,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.paymentStatusText,
+                            b.paymentStatus === 'paid' ? styles.paidText : styles.unpaidText,
+                          ]}
+                        >
+                          {b.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'}
+                        </Text>
+                      </View>
+                    </View>
                   </View>
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -959,5 +992,11 @@ const styles = StyleSheet.create({
   paymentStatusText: {
     fontSize: 9,
     fontWeight: '800',
+  },
+  paidText: {
+    color: Colors.successGreen,
+  },
+  unpaidText: {
+    color: '#DC2626',
   },
 });

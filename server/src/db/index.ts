@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
+import prisma from './prisma';
 
 dotenv.config();
 
@@ -15,3 +16,6 @@ pool.on('error', (err) => {
 });
 
 export const query = (text: string, params?: any[]) => pool.query(text, params);
+
+export { prisma };
+export default prisma;
