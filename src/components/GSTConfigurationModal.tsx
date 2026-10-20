@@ -44,6 +44,14 @@ export const GSTConfigurationModal: React.FC<GSTConfigurationModalProps> = ({
   const [showBreakdown, setShowBreakdown] = useState(true);
   const [hsnCode, setHsnCode] = useState('9963');
 
+  React.useEffect(() => {
+    if (visible) {
+      setEnabled(initialEnabled);
+      setGstRate(initialRate);
+      if (initialGstin) setGstin(initialGstin);
+    }
+  }, [visible, initialEnabled, initialRate, initialGstin]);
+
   const halfRate = (gstRate / 2).toFixed(1);
 
   const handleSave = () => {

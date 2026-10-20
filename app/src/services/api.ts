@@ -1,7 +1,26 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-const BASE_URL = 'https://api.ezydine.in/api';
+export const PRIMARY_URL = 'https://api.ezydine.in/api';
+export const LOCAL_DEV_URL = Platform.select({
+  android: 'http://10.0.2.2:5001/api',
+  default: 'http://localhost:5001/api',
+});
+
+let currentBaseUrl = PRIMARY_URL;
+
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 5000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timer);
+    return res;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
 
 const TOKEN_KEY = '@ezydine_auth_token';
 const USER_KEY = '@ezydine_user_data';
@@ -12,7 +31,7 @@ const DEVICE_KEY = '@ezydine_device_id';
 // Memory fallback in case native AsyncStorage module is not linked in running binary
 const memoryStore = new Map<string, string>();
 
-const safeStorage = {
+export const safeStorage = {
   async getItem(key: string): Promise<string | null> {
     try {
       if (AsyncStorage && typeof AsyncStorage.getItem === 'function') {
@@ -132,18 +151,21 @@ class ApiService {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
-    try {
-      const response = await fetch(`${BASE_URL}${endpoint}`, {
+    const doFetch = async (baseUrl: string) => {
+      const response = await fetchWithTimeout(`${baseUrl}${endpoint}`, {
         ...options,
         headers,
-      });
+      }, 5000);
 
       const data = await response.json().catch(() => ({}));
 
       if (response.status === 401) {
-        // Token expired or invalid
         await this.clearAuth();
         throw new Error(data.error || 'Authentication token expired. Please sign in again.');
+      }
+
+      if (response.status === 504 || response.status === 502 || response.status === 503) {
+        throw new Error(`Server gateway timeout or unavailable (${response.status})`);
       }
 
       if (!response.ok) {
@@ -151,9 +173,23 @@ class ApiService {
       }
 
       return data;
-    } catch (err: any) {
-      console.warn(`API Error [${endpoint}]:`, err.message);
-      throw err;
+    };
+
+    try {
+      return await doFetch(currentBaseUrl);
+    } catch (primaryErr: any) {
+      // In development or when primary times out / 504, try local server
+      if (__DEV__ && currentBaseUrl !== LOCAL_DEV_URL && LOCAL_DEV_URL) {
+        try {
+          const fallbackData = await doFetch(LOCAL_DEV_URL);
+          currentBaseUrl = LOCAL_DEV_URL;
+          return fallbackData;
+        } catch {
+          // Both failed, proceed to report
+        }
+      }
+      console.warn(`API Error [${endpoint}]:`, primaryErr.message);
+      throw primaryErr;
     }
   }
 

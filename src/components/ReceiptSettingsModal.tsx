@@ -21,6 +21,7 @@ interface ReceiptSettingsModalProps {
   connectedPrinter?: string | null;
   restaurantLogo?: string | null;
   onPickLogo?: () => void;
+  initialConfig?: ReceiptConfig;
 }
 
 export interface ReceiptConfig {
@@ -39,13 +40,25 @@ export const ReceiptSettingsModal: React.FC<ReceiptSettingsModalProps> = ({
   connectedPrinter,
   restaurantLogo,
   onPickLogo,
+  initialConfig,
 }) => {
-  const [showLogo, setShowLogo] = useState(true);
-  const [showGst, setShowGst] = useState(true);
-  const [showFssai, setShowFssai] = useState(true);
-  const [headerText, setHeaderText] = useState('The Curry House · Authentic Flavors');
-  const [footerText, setFooterText] = useState('Thank you for dining with us! Visit again.');
-  const [paperWidth, setPaperWidth] = useState<'58mm' | '80mm'>('58mm');
+  const [showLogo, setShowLogo] = useState(initialConfig?.showLogo ?? true);
+  const [showGst, setShowGst] = useState(initialConfig?.showGst ?? true);
+  const [showFssai, setShowFssai] = useState(initialConfig?.showFssai ?? true);
+  const [headerText, setHeaderText] = useState(initialConfig?.headerText || 'Authentic Flavors');
+  const [footerText, setFooterText] = useState(initialConfig?.footerText || 'Thank you for dining with us! Visit again.');
+  const [paperWidth, setPaperWidth] = useState<'58mm' | '80mm'>(initialConfig?.paperWidth || '58mm');
+
+  React.useEffect(() => {
+    if (visible && initialConfig) {
+      if (initialConfig.showLogo !== undefined) setShowLogo(initialConfig.showLogo);
+      if (initialConfig.showGst !== undefined) setShowGst(initialConfig.showGst);
+      if (initialConfig.showFssai !== undefined) setShowFssai(initialConfig.showFssai);
+      if (initialConfig.headerText !== undefined) setHeaderText(initialConfig.headerText);
+      if (initialConfig.footerText !== undefined) setFooterText(initialConfig.footerText);
+      if (initialConfig.paperWidth !== undefined) setPaperWidth(initialConfig.paperWidth);
+    }
+  }, [visible, initialConfig]);
 
   const handleTestPrint = () => {
     Alert.alert(

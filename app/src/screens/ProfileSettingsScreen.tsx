@@ -5,11 +5,11 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   Switch,
   Alert,
   Image,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
@@ -18,7 +18,7 @@ import { BluetoothPrinterModal, BluetoothDevice } from '../components/BluetoothP
 import { ReceiptSettingsModal, ReceiptConfig } from '../components/ReceiptSettingsModal';
 import { GSTConfigurationModal, GSTConfig } from '../components/GSTConfigurationModal';
 import { StaffManagementModal } from '../components/StaffManagementModal';
-import { api } from '../services/api';
+import { api, safeStorage } from '../services/api';
 
 interface ProfileSettingsScreenProps {
   onBack: () => void;
@@ -64,7 +64,7 @@ export const ProfileSettingsScreen: React.FC<ProfileSettingsScreenProps> = ({
     showLogo: true,
     showGst: true,
     showFssai: true,
-    headerText: 'The Curry House · Authentic Flavors',
+    headerText: 'Authentic Flavors',
     footerText: 'Thank you for dining with us! Visit again.',
     paperWidth: '58mm',
   });
@@ -78,7 +78,7 @@ export const ProfileSettingsScreen: React.FC<ProfileSettingsScreenProps> = ({
   });
 
   useEffect(() => {
-    // Quick load from local cache
+    // 1. Quick load from local cache
     api.getRestaurant().then((cached) => {
       if (cached) {
         setProfile((prev: any) => ({
@@ -91,6 +91,37 @@ export const ProfileSettingsScreen: React.FC<ProfileSettingsScreenProps> = ({
       }
     }).catch(() => null);
 
+    safeStorage.getItem('@ezydine_gst_config').then((raw) => {
+      if (raw) {
+        try {
+          setGstConfig(JSON.parse(raw));
+        } catch {}
+      }
+    }).catch(() => null);
+
+    safeStorage.getItem('@ezydine_receipt_config').then((raw) => {
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          setReceiptConfig(parsed);
+          if (parsed.paperWidth) setPaperWidth(parsed.paperWidth);
+        } catch {}
+      }
+    }).catch(() => null);
+
+    safeStorage.getItem('@ezydine_kot_enabled').then((raw) => {
+      if (raw !== null && raw !== undefined) {
+        setKotPrintingEnabled(raw === 'true');
+      }
+    }).catch(() => null);
+
+    safeStorage.getItem('@ezydine_paper_width').then((raw) => {
+      if (raw === '58mm' || raw === '80mm') {
+        setPaperWidth(raw);
+      }
+    }).catch(() => null);
+
+    // 2. Fresh sync from API
     const fetchProfile = async () => {
       try {
         const res = await api.restaurant.getProfile();
@@ -98,14 +129,33 @@ export const ProfileSettingsScreen: React.FC<ProfileSettingsScreenProps> = ({
         if (res?.success && p) {
           setProfile(p);
           if (p.thermalPaperWidth || p.thermal_paper_width) {
-            setPaperWidth(p.thermalPaperWidth || p.thermal_paper_width);
+            const width = p.thermalPaperWidth || p.thermal_paper_width;
+            setPaperWidth(width);
+            safeStorage.setItem('@ezydine_paper_width', width);
           }
           if (p.kotEnabled !== undefined || p.kot_enabled !== undefined) {
-            setKotPrintingEnabled(p.kotEnabled !== undefined ? p.kotEnabled : p.kot_enabled);
+            const rawKot = p.kotEnabled !== undefined ? p.kotEnabled : p.kot_enabled;
+            const isKot = rawKot === true || rawKot === 'true';
+            setKotPrintingEnabled(isKot);
+            safeStorage.setItem('@ezydine_kot_enabled', isKot ? 'true' : 'false');
+          }
+          if (p.gstRate !== undefined || p.gst_rate !== undefined) {
+            const rateNum = parseFloat(p.gstRate || p.gst_rate || '0');
+            const isGstOn = rateNum > 0;
+            setGstConfig((prev) => {
+              const updated = {
+                ...prev,
+                enabled: isGstOn,
+                gstRate: isGstOn ? rateNum : prev.gstRate,
+                gstin: p.gstNumber || p.gst_number || prev.gstin,
+              };
+              safeStorage.setItem('@ezydine_gst_config', JSON.stringify(updated));
+              return updated;
+            });
           }
         }
       } catch (e) {
-        // Fallback
+        // Fallback to local cache
       }
     };
     fetchProfile();
@@ -113,31 +163,50 @@ export const ProfileSettingsScreen: React.FC<ProfileSettingsScreenProps> = ({
 
   const handleUpdatePrinterWidth = async (width: '58mm' | '80mm') => {
     setPaperWidth(width);
+    await safeStorage.setItem('@ezydine_paper_width', width);
     try {
       await api.restaurant.updateProfile({ thermalPaperWidth: width });
     } catch (e) {
-      // silent sync
+      // cached locally
     }
   };
 
   const handleToggleKot = async (enabled: boolean) => {
     setKotPrintingEnabled(enabled);
+    await safeStorage.setItem('@ezydine_kot_enabled', enabled ? 'true' : 'false');
     try {
       await api.restaurant.updateProfile({ kotEnabled: enabled });
     } catch (e) {
-      // silent sync
+      // cached locally
     }
   };
 
   const handleSaveGst = async (config: GSTConfig) => {
     setGstConfig(config);
+    await safeStorage.setItem('@ezydine_gst_config', JSON.stringify(config));
     try {
       await api.restaurant.updateProfile({
         gstRate: config.enabled ? config.gstRate.toString() : '0',
         gstNumber: config.gstin,
       });
     } catch (e) {
-      // silent sync
+      // cached locally
+    }
+  };
+
+  const handleSaveReceipt = async (newSettings: ReceiptConfig) => {
+    setReceiptConfig(newSettings);
+    await safeStorage.setItem('@ezydine_receipt_config', JSON.stringify(newSettings));
+    if (newSettings.paperWidth) {
+      setPaperWidth(newSettings.paperWidth);
+      await safeStorage.setItem('@ezydine_paper_width', newSettings.paperWidth);
+    }
+    try {
+      await api.restaurant.updateProfile({
+        thermalPaperWidth: newSettings.paperWidth,
+      });
+    } catch (e) {
+      // cached locally
     }
   };
 
@@ -535,7 +604,8 @@ export const ProfileSettingsScreen: React.FC<ProfileSettingsScreenProps> = ({
         <ReceiptSettingsModal
           visible={isReceiptModalOpen}
           onClose={() => setIsReceiptModalOpen(false)}
-          onSave={(newSettings) => setReceiptConfig(newSettings)}
+          onSave={handleSaveReceipt}
+          initialConfig={receiptConfig}
           connectedPrinter={connectedPrinter ? connectedPrinter.name : undefined}
           restaurantLogo={profile.logoUrl || profile.logo}
           onPickLogo={handlePickLogo}

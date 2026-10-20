@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   TextInput,
   FlatList,
   Image,
@@ -16,11 +15,12 @@ import {
   Platform,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { MenuItem } from '../types';
 import { MOCK_MENU_ITEMS } from '../data/mockData';
-import { api } from '../services/api';
+import { api, safeStorage } from '../services/api';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
@@ -52,6 +52,8 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTable, setSelectedTable] = useState('Table 01');
   const [restaurantName, setRestaurantName] = useState('Ezydine Restaurant');
+  const [gstRate, setGstRate] = useState<number>(5.0);
+  const [gstEnabled, setGstEnabled] = useState<boolean>(true);
 
   // Modals
   const [showTableModal, setShowTableModal] = useState(false);
@@ -74,6 +76,16 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
       if (cached && (cached.name || cached.restaurant_name)) {
         setRestaurantName(cached.name || cached.restaurant_name);
       }
+
+      safeStorage.getItem('@ezydine_gst_config').then((raw) => {
+        if (raw) {
+          try {
+            const parsed = JSON.parse(raw);
+            setGstEnabled(parsed.enabled !== false);
+            if (parsed.gstRate !== undefined) setGstRate(Number(parsed.gstRate));
+          } catch {}
+        }
+      }).catch(() => null);
 
       const [menuRes, profileRes] = await Promise.allSettled([
         api.menu.getAll(),
@@ -103,8 +115,15 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
 
       if (profileRes.status === 'fulfilled' && profileRes.value?.success) {
         const prof = profileRes.value.profile || profileRes.value.restaurant;
-        if (prof && (prof.name || prof.restaurant_name)) {
-          setRestaurantName(prof.name || prof.restaurant_name);
+        if (prof) {
+          if (prof.name || prof.restaurant_name) {
+            setRestaurantName(prof.name || prof.restaurant_name);
+          }
+          if (prof.gstRate !== undefined || prof.gst_rate !== undefined) {
+            const rateVal = parseFloat(prof.gstRate || prof.gst_rate || '0');
+            setGstEnabled(rateVal > 0);
+            if (rateVal > 0) setGstRate(rateVal);
+          }
         }
       }
     } catch (e) {
@@ -234,8 +253,10 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
     return sum + q * item.price;
   }, 0);
 
-  const cgst = subtotal * 0.025;
-  const sgst = subtotal * 0.025;
+  const activeGstRate = gstEnabled ? gstRate : 0;
+  const halfGstPercent = activeGstRate / 2;
+  const cgst = (subtotal * halfGstPercent) / 100;
+  const sgst = (subtotal * halfGstPercent) / 100;
   const grandTotal = subtotal + cgst + sgst;
 
   // Selected items list for checkout review modal
@@ -856,7 +877,11 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
                   <Text style={styles.summaryVal}>₹{subtotal.toFixed(2)}</Text>
                 </View>
                 <View style={styles.summaryLine}>
-                  <Text style={styles.summaryLabel}>CGST (2.5%) + SGST (2.5%)</Text>
+                  <Text style={styles.summaryLabel}>
+                    {activeGstRate > 0
+                      ? `CGST (${halfGstPercent.toFixed(1)}%) + SGST (${halfGstPercent.toFixed(1)}%)`
+                      : 'GST Exempt / Disabled (0%)'}
+                  </Text>
                   <Text style={styles.summaryVal}>₹{(cgst + sgst).toFixed(2)}</Text>
                 </View>
                 <View style={styles.summaryDivider} />
