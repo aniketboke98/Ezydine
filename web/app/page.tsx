@@ -149,6 +149,30 @@ const apiFetch = async (endpoint: string, options: RequestInit = {}): Promise<Re
   return await fetch(primaryUrl, options);
 };
 
+// Specialized Print fetcher: First attempts local hardware agent on counter PC (for USB thermal printing), then falls back to cloud API
+const printApiFetch = async (endpoint: string, options: RequestInit = {}): Promise<Response> => {
+  const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+  if (typeof window !== 'undefined') {
+    try {
+      const localController = new AbortController();
+      const localTimeout = setTimeout(() => localController.abort(), 1200);
+      const localRes = await fetch(`http://localhost:5001/api${path}`, {
+        ...options,
+        signal: localController.signal,
+      });
+      clearTimeout(localTimeout);
+      if (localRes.ok) {
+        return localRes;
+      }
+    } catch {
+      // Local counter print agent not active on this device, fall back to cloud
+    }
+  }
+
+  return await apiFetch(endpoint, options);
+};
+
 const DEFAULT_FLOOR_TABLES: Table[] = [
   { id: 't1', number: '01', capacity: 2, section: 'Dine-In', status: 'available' },
   { id: 't2', number: '02', capacity: 4, section: 'Dine-In', status: 'available' },
@@ -827,7 +851,7 @@ export default function ManagerOrderPortal() {
   // Auto-discover and connect real CUPS / OS hardware thermal printers
   const loadSystemPrinters = async () => {
     try {
-      const res = await apiFetch('/print/printers');
+      const res = await printApiFetch('/print/printers');
       const data = await res.json();
       if (data.success && Array.isArray(data.printers) && data.printers.length > 0) {
         const discoveredPrinters: RealPrinterDevice[] = data.printers.map((p: any) => ({
@@ -1184,7 +1208,7 @@ export default function ManagerOrderPortal() {
         return;
       }
 
-      const res = await apiFetch('/print', {
+      const res = await printApiFetch('/print', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1226,7 +1250,7 @@ export default function ManagerOrderPortal() {
     playReceiptChime();
     setPrintStatusMessage(`Sending test slip to ${activePrinter.name}...`);
     try {
-      const res = await apiFetch('/print', {
+      const res = await printApiFetch('/print', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
