@@ -235,10 +235,10 @@ export default function ManagerOrderPortal() {
   // Hardware Printer State
   const [pairedPrinters, setPairedPrinters] = useState<RealPrinterDevice[]>([]);
   const [activePrinter, setActivePrinter] = useState<RealPrinterDevice>({
-    id: 'default_system_printer',
-    name: 'Default System Spooler (USB/Network)',
+    id: 'sys_Printer_POS_58',
+    name: 'Printer_POS_58',
     connectionType: 'system',
-    paperWidth: '80mm',
+    paperWidth: '58mm',
     status: 'connected',
   });
   const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
@@ -854,11 +854,11 @@ export default function ManagerOrderPortal() {
         setPairedPrinters(discoveredPrinters);
         localStorage.setItem('ezydine_real_printers', JSON.stringify(discoveredPrinters));
 
-        // Auto-select system default printer if active printer is generic placeholder
+        // Auto-select system default printer
         const defaultSys = data.printers.find((p: any) => p.isDefault) || data.printers[0];
         setActivePrinter((prev) => {
           const match = discoveredPrinters.find((dp) => dp.name === prev.name);
-          if (match) return match;
+          if (match && !match.name.includes('Default System Spooler')) return match;
           const defaultDev: RealPrinterDevice = {
             id: `sys_${defaultSys.name}`,
             name: defaultSys.name,
@@ -3657,30 +3657,29 @@ export default function ManagerOrderPortal() {
               </button>
 
               <div className="flex items-center gap-2">
-                {/* BROWSER / SYSTEM PRINT DIALOG (For USB, Bluetooth, or Local Thermal Printers) */}
+                {/* DIRECT AUTOMATIC THERMAL HARDWARE PRINT (Zero Browser Pop-up!) */}
+                <button
+                  type="button"
+                  disabled={isDirectPrinting}
+                  onClick={handleDirectHardwarePrint}
+                  className="flex items-center gap-2 bg-[#D92F43] hover:bg-[#B82035] text-white px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md disabled:opacity-75"
+                  title={`Direct automatic hardware printing to ${activePrinter.name}`}
+                >
+                  <Printer className={`w-4 h-4 ${isDirectPrinting ? 'animate-bounce text-[#10B981]' : ''}`} />
+                  <span>{isDirectPrinting ? 'Sending to Hardware...' : `Direct Print: ${activePrinter.name}`}</span>
+                </button>
+
+                {/* Optional Fallback for System Browser Dialog if Needed */}
                 <button
                   type="button"
                   onClick={() => {
                     playReceiptChime();
                     window.print();
                   }}
-                  className="flex items-center gap-1.5 bg-[#D92F43] hover:bg-[#B82035] text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs"
-                  title="Print to any local or USB thermal printer via system dialog"
+                  className="px-3 py-2 rounded-xl border border-[#E2E8F0] hover:bg-[#F8FAFC] text-[11px] font-semibold text-[#64748B] transition-all"
+                  title="Open browser system print menu (for PDF export or AirPrint)"
                 >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Print Slip</span>
-                </button>
-
-                {/* DIRECT AUTOMATIC THERMAL PRINT (CUPS) */}
-                <button
-                  type="button"
-                  disabled={isDirectPrinting}
-                  onClick={handleDirectHardwarePrint}
-                  className="flex items-center gap-1.5 bg-[#0B1B29] hover:bg-[#1E293B] text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs disabled:opacity-75"
-                  title={`Direct automatic hardware spooling to ${activePrinter.name}`}
-                >
-                  <Printer className={`w-3.5 h-3.5 ${isDirectPrinting ? 'animate-bounce text-[#10B981]' : ''}`} />
-                  <span>{isDirectPrinting ? 'Sending to Printer...' : `Direct Print: ${activePrinter.name}`}</span>
+                  System Dialog
                 </button>
 
                 <button
@@ -3689,7 +3688,7 @@ export default function ManagerOrderPortal() {
                     setIsGeneratePrintOpen(false);
                     setIsTemplateEditorOpen(false);
                   }}
-                  className="bg-[#D92F43] hover:bg-[#B82035] text-white px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs"
+                  className="bg-[#F1F5F9] hover:bg-[#E2E8F0] text-[#0B1B29] px-4 py-2 rounded-xl text-xs font-bold transition-all"
                 >
                   Done
                 </button>

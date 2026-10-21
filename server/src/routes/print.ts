@@ -18,6 +18,29 @@ function runCmd(command: string): Promise<string> {
   });
 }
 
+// Helper: Discover directly connected USB thermal printers via CUPS usb backend
+async function getConnectedUsbPrinters(): Promise<Array<{ uri: string; name: string; isThermal: boolean }>> {
+  if (os.platform() !== 'darwin') return [];
+  try {
+    const out = await runCmd('/usr/libexec/cups/backend/usb');
+    const results: Array<{ uri: string; name: string; isThermal: boolean }> = [];
+    const lines = out.split('\n');
+    for (const line of lines) {
+      const match = line.match(/^direct\s+([^\s]+)\s+"([^"]+)"/);
+      if (match) {
+        const uri = match[1];
+        const name = match[2];
+        const lower = (uri + ' ' + name + ' ' + line).toLowerCase();
+        const isThermal = lower.includes('pos') || lower.includes('printe') || lower.includes('thermal') || lower.includes('receipt') || lower.includes('58') || lower.includes('80');
+        results.push({ uri, name, isThermal });
+      }
+    }
+    return results;
+  } catch {
+    return [];
+  }
+}
+
 // 1. GET Connected Printers
 router.get('/printers', async (req: Request, res: Response) => {
   try {
@@ -57,6 +80,20 @@ router.get('/printers', async (req: Request, res: Response) => {
       }
     }
 
+    // Check directly connected USB hardware devices
+    const usbPrinters = await getConnectedUsbPrinters();
+    const activeUsb = usbPrinters.find(u => u.isThermal) || usbPrinters[0];
+
+    // If an active USB printer matches one of our CUPS printers, ensure its status is marked idle
+    if (activeUsb) {
+      const normalizedUsbName = activeUsb.name.replace(/[^a-zA-Z0-9]/g, '_');
+      for (const p of printers) {
+        if (p.name === normalizedUsbName || p.name.includes('POS_58') || p.name.includes('POS80')) {
+          p.status = 'idle'; // Physically connected and ready
+        }
+      }
+    }
+
     // Set default printer flag
     for (const p of printers) {
       if (p.name === defaultPrinter) {
@@ -73,6 +110,7 @@ router.get('/printers', async (req: Request, res: Response) => {
       success: true,
       defaultPrinter,
       printers,
+      usbPrinters,
     });
   } catch (error: any) {
     console.error('Error discovering printers:', error);
@@ -385,26 +423,60 @@ router.post('/', async (req: Request, res: Response) => {
     const tmpFilePath = path.join(os.tmpdir(), `ezydine_escpos_${Date.now()}.bin`);
     fs.writeFileSync(tmpFilePath, escposBuffer);
 
-    // Send using lp with -o raw (Raw binary stream to thermal printer)
-    let lpCommand = `lp -d "${targetPrinter}" -o raw "${tmpFilePath}"`;
-    let lpResult = '';
-    try {
-      lpResult = await runCmd(lpCommand);
-    } catch (rawError: any) {
-      console.warn('Raw lp failed, retrying standard text mode:', rawError.message);
-      // Fallback: Send plain formatted ASCII text without -o raw
-      const plainText = formatReceiptText({
-        type,
-        order,
-        template,
-        width: effectiveWidth,
-      });
-      const txtPath = path.join(os.tmpdir(), `ezydine_text_${Date.now()}.txt`);
-      fs.writeFileSync(txtPath, plainText, 'ascii');
-      lpResult = await runCmd(`lp -d "${targetPrinter}" "${txtPath}"`);
-      setTimeout(() => {
-        try { if (fs.existsSync(txtPath)) fs.unlinkSync(txtPath); } catch {}
-      }, 2000);
+    let printedVia = '';
+    let dispatchOutput = '';
+
+    // Strategy 1: On macOS, check if direct USB connection exists for hardware thermal printing
+    const usbPrinters = await getConnectedUsbPrinters();
+    let directUsbUri = '';
+    for (const u of usbPrinters) {
+      const uLower = u.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const tLower = targetPrinter.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (uLower.includes(tLower) || tLower.includes(uLower) || (u.isThermal && tLower.includes('pos'))) {
+        directUsbUri = u.uri;
+        break;
+      }
+    }
+    if (!directUsbUri && usbPrinters.length > 0 && usbPrinters[0].isThermal) {
+      directUsbUri = usbPrinters[0].uri;
+    }
+
+    if (directUsbUri && fs.existsSync('/usr/libexec/cups/backend/usb')) {
+      try {
+        console.log(`[Print Service] Dispatching directly via macOS USB backend: ${directUsbUri}`);
+        const cmd = `DEVICE_URI="${directUsbUri}" /usr/libexec/cups/backend/usb 1 ezydine "POS Receipt" 1 "" "${tmpFilePath}"`;
+        dispatchOutput = await runCmd(cmd);
+        printedVia = `direct_usb (${directUsbUri})`;
+      } catch (usbErr: any) {
+        console.warn('Direct USB backend dispatch failed, falling back to CUPS lp:', usbErr.message);
+      }
+    }
+
+    // Strategy 2: If direct USB wasn't used or failed, dispatch via CUPS lp
+    if (!printedVia) {
+      try {
+        // Ensure queue is enabled before sending
+        try { await runCmd(`cupsenable "${targetPrinter}"`); } catch {}
+
+        // Standard spooling without -o raw avoids macOS USBGenericPrintingClass stall
+        const plainText = formatReceiptText({
+          type,
+          order,
+          template,
+          width: effectiveWidth,
+        });
+        const txtPath = path.join(os.tmpdir(), `ezydine_text_${Date.now()}.txt`);
+        fs.writeFileSync(txtPath, plainText, 'ascii');
+        dispatchOutput = await runCmd(`lp -d "${targetPrinter}" "${txtPath}"`);
+        printedVia = `cups_lp (${targetPrinter})`;
+        setTimeout(() => {
+          try { if (fs.existsSync(txtPath)) fs.unlinkSync(txtPath); } catch {}
+        }, 3000);
+      } catch (lpErr: any) {
+        // Retry raw binary with lp
+        dispatchOutput = await runCmd(`lp -d "${targetPrinter}" -o raw "${tmpFilePath}"`);
+        printedVia = `cups_raw (${targetPrinter})`;
+      }
     }
 
     // Cleanup temporary binary file
@@ -419,9 +491,10 @@ router.post('/', async (req: Request, res: Response) => {
     return res.json({
       success: true,
       printer: targetPrinter,
+      printedVia,
       width: effectiveWidth,
       message: `Print dispatched cleanly to ${targetPrinter}`,
-      lpOutput: lpResult,
+      lpOutput: dispatchOutput,
     });
   } catch (error: any) {
     console.error('Error executing hardware print:', error);
