@@ -130,9 +130,9 @@ export interface RealPrinterDevice {
 
 const getApiBaseUrl = () => {
   if (typeof window !== 'undefined') {
-    // If accessing from a remote IP (e.g. VPS or LAN), target that same host on port 5001
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      return `http://${window.location.hostname}:5001/api`;
+    // If accessing from ezydine.in domain (e.g. manager.ezydine.in)
+    if (window.location.hostname.includes('ezydine.in')) {
+      return `${window.location.protocol}//api.ezydine.in/api`;
     }
   }
   if (process.env.NEXT_PUBLIC_API_URL) {
@@ -146,20 +146,7 @@ const apiFetch = async (endpoint: string, options: RequestInit = {}): Promise<Re
   const base = getApiBaseUrl();
   const primaryUrl = `${base}${path}`;
 
-  try {
-    const res = await fetch(primaryUrl, options);
-    return res;
-  } catch (err) {
-    if (!primaryUrl.includes('localhost:5001') && !primaryUrl.includes('127.0.0.1:5001')) {
-      try {
-        console.warn(`[API] Failed to reach ${primaryUrl}, falling back to local backend http://localhost:5001/api${path}`);
-        return await fetch(`http://localhost:5001/api${path}`, options);
-      } catch {
-        // preserve original error
-      }
-    }
-    throw err;
-  }
+  return await fetch(primaryUrl, options);
 };
 
 const DEFAULT_FLOOR_TABLES: Table[] = [
