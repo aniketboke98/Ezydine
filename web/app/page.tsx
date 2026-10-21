@@ -189,24 +189,6 @@ const DEFAULT_FLOOR_TABLES: Table[] = [
 
 const DEFAULT_MENU_ITEMS: MenuItem[] = [
   // South Indian
-  { id: 101, name: 'Masala Dosa', category: 'South Indian', price: 120, isVeg: true, isAvailable: true, description: 'Crispy rice crepe filled with spiced potato masala' },
-  { id: 102, name: 'Idli Vada Combo', category: 'South Indian', price: 90, isVeg: true, isAvailable: true, description: '2 steamed idlis and 1 crispy medu vada with hot sambar' },
-  { id: 103, name: 'Plain Dosa', category: 'South Indian', price: 90, isVeg: true, isAvailable: true, description: 'Golden roasted crispy plain crepe' },
-  { id: 104, name: 'Mysore Masala Dosa', category: 'South Indian', price: 140, isVeg: true, isAvailable: true, description: 'Crispy dosa smeared with red garlic chutney & potato bhaji' },
-  { id: 105, name: 'South Indian Filter Kaapi', category: 'South Indian', price: 50, isVeg: true, isAvailable: true, description: 'Aromatic frothy chicory filter coffee' },
-
-  // Snacks
-  { id: 201, name: 'Samosa (2 pcs)', category: 'Snacks', price: 60, isVeg: true, isAvailable: true, description: 'Crispy pastry stuffed with spiced potato and peas' },
-  { id: 202, name: 'Paneer Pakoda', category: 'Snacks', price: 140, isVeg: true, isAvailable: true, description: 'Spiced gram-flour battered fresh cottage cheese fritters' },
-  { id: 203, name: 'Pav Bhaji Special', category: 'Snacks', price: 160, isVeg: true, isAvailable: true, description: 'Butter mashed vegetable curry with 2 pav' },
-  { id: 204, name: 'Vada Pav (2 pcs)', category: 'Snacks', price: 70, isVeg: true, isAvailable: true, description: 'Iconic Mumbai potato vada inside pav with chutney' },
-  { id: 205, name: 'Crispy French Fries', category: 'Snacks', price: 110, isVeg: true, isAvailable: true, description: 'Golden salted potato fries' },
-
-  // Mains & Breads
-  { id: 301, name: 'Paneer Butter Masala', category: 'Mains', price: 320, isVeg: true, isAvailable: true, description: 'Rich cottage cheese in creamy tomato gravy' },
-  { id: 302, name: 'Dal Makhani Royale', category: 'Mains', price: 260, isVeg: true, isAvailable: true, description: 'Slow-cooked black lentils in butter & cream' },
-  { id: 303, name: 'Butter Chicken Special', category: 'Mains', price: 380, isVeg: false, isAvailable: true, description: 'Smoked chicken in classic fenugreek butter gravy' },
-  { id: 304, name: 'Garlic Naan', category: 'Breads', price: 70, isVeg: true, isAvailable: true, description: 'Tandoori naan topped with roasted garlic' },
 ];
 
 export default function ManagerOrderPortal() {
@@ -1665,8 +1647,8 @@ export default function ManagerOrderPortal() {
               <button
                 onClick={() => setCurrentView('pos')}
                 className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${currentView === 'pos'
-                    ? 'bg-white text-[#0B1B29] shadow-xs'
-                    : 'text-[#64748B] hover:text-[#0B1B29]'
+                  ? 'bg-white text-[#0B1B29] shadow-xs'
+                  : 'text-[#64748B] hover:text-[#0B1B29]'
                   }`}
               >
                 <UtensilsCrossed className="w-4 h-4 text-[#D92F43]" />
@@ -1681,8 +1663,8 @@ export default function ManagerOrderPortal() {
               <button
                 onClick={() => setCurrentView('history')}
                 className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${currentView === 'history'
-                    ? 'bg-white text-[#0B1B29] shadow-xs'
-                    : 'text-[#64748B] hover:text-[#0B1B29]'
+                  ? 'bg-white text-[#0B1B29] shadow-xs'
+                  : 'text-[#64748B] hover:text-[#0B1B29]'
                   }`}
               >
                 <History className="w-4 h-4 text-[#2563EB]" />
@@ -1699,8 +1681,8 @@ export default function ManagerOrderPortal() {
                   loadMasterAppLogins();
                 }}
                 className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${currentView === 'master'
-                    ? 'bg-white text-[#0B1B29] shadow-xs'
-                    : 'text-[#64748B] hover:text-[#0B1B29]'
+                  ? 'bg-white text-[#0B1B29] shadow-xs'
+                  : 'text-[#64748B] hover:text-[#0B1B29]'
                   }`}
               >
                 <Key className="w-4 h-4 text-[#D97706]" />
@@ -1834,10 +1816,10 @@ export default function ManagerOrderPortal() {
                       key={t.id}
                       onClick={() => handleSelectTable(t)}
                       className={`shrink-0 flex flex-col items-center justify-center px-4 py-2.5 rounded-xl border text-xs transition-all relative ${isSelected
-                          ? 'border-[#0B1B29] bg-[#0B1B29] text-white shadow-md'
-                          : isOccupied
-                            ? 'border-[#FECDD3] bg-[#FFF1F2] text-[#0B1B29] hover:border-[#D92F43]'
-                            : 'border-[#E2E8F0] bg-white text-[#0B1B29] hover:border-[#CBD5E1]'
+                        ? 'border-[#0B1B29] bg-[#0B1B29] text-white shadow-md'
+                        : isOccupied
+                          ? 'border-[#FECDD3] bg-[#FFF1F2] text-[#0B1B29] hover:border-[#D92F43]'
+                          : 'border-[#E2E8F0] bg-white text-[#0B1B29] hover:border-[#CBD5E1]'
                         }`}
                     >
                       {/* Active Order Indicator Dot */}
@@ -1857,8 +1839,8 @@ export default function ManagerOrderPortal() {
                       {isOccupied && (
                         <div
                           className={`mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md ${isSelected
-                              ? 'bg-white/20 text-white'
-                              : 'bg-[#D92F43] text-white'
+                            ? 'bg-white/20 text-white'
+                            : 'bg-[#D92F43] text-white'
                             }`}
                         >
                           {t.activeItemsCount} items • ₹{t.activeTotal}
@@ -1881,8 +1863,8 @@ export default function ManagerOrderPortal() {
                       key={cat}
                       onClick={() => setSelectedCategory(cat)}
                       className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all capitalize whitespace-nowrap ${selectedCategory === cat
-                          ? 'bg-[#D92F43] text-white shadow-xs'
-                          : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#0B1B29] hover:bg-[#E2E8F0]'
+                        ? 'bg-[#D92F43] text-white shadow-xs'
+                        : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#0B1B29] hover:bg-[#E2E8F0]'
                         }`}
                     >
                       {cat}
@@ -2131,8 +2113,8 @@ export default function ManagerOrderPortal() {
                   type="button"
                   onClick={() => setSelectedPaymentMethod('Cash')}
                   className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedPaymentMethod === 'Cash'
-                      ? 'border-[#16A34A] bg-[#F0FDF4] text-[#16A34A] shadow-xs'
-                      : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
+                    ? 'border-[#16A34A] bg-[#F0FDF4] text-[#16A34A] shadow-xs'
+                    : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
                     }`}
                 >
                   <Banknote className="w-3.5 h-3.5" />
@@ -2143,8 +2125,8 @@ export default function ManagerOrderPortal() {
                   type="button"
                   onClick={() => setSelectedPaymentMethod('UPI')}
                   className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedPaymentMethod === 'UPI'
-                      ? 'border-[#2563EB] bg-[#EFF6FF] text-[#2563EB] shadow-xs'
-                      : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
+                    ? 'border-[#2563EB] bg-[#EFF6FF] text-[#2563EB] shadow-xs'
+                    : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
                     }`}
                 >
                   <QrCode className="w-3.5 h-3.5" />
@@ -2155,8 +2137,8 @@ export default function ManagerOrderPortal() {
                   type="button"
                   onClick={() => setSelectedPaymentMethod('Card')}
                   className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all border ${selectedPaymentMethod === 'Card'
-                      ? 'border-[#7C3AED] bg-[#F5F3FF] text-[#7C3AED] shadow-xs'
-                      : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
+                    ? 'border-[#7C3AED] bg-[#F5F3FF] text-[#7C3AED] shadow-xs'
+                    : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
                     }`}
                 >
                   <CreditCard className="w-3.5 h-3.5" />
@@ -2313,8 +2295,8 @@ export default function ManagerOrderPortal() {
               <button
                 onClick={() => setHistoryFilterPayment('all')}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${historyFilterPayment === 'all'
-                    ? 'bg-[#0B1B29] text-white shadow-xs'
-                    : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#0B1B29]'
+                  ? 'bg-[#0B1B29] text-white shadow-xs'
+                  : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#0B1B29]'
                   }`}
               >
                 All Orders ({orderHistory.length})
@@ -2323,8 +2305,8 @@ export default function ManagerOrderPortal() {
               <button
                 onClick={() => setHistoryFilterPayment('Cash')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${historyFilterPayment === 'Cash'
-                    ? 'bg-[#16A34A] text-white shadow-xs'
-                    : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#16A34A]'
+                  ? 'bg-[#16A34A] text-white shadow-xs'
+                  : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#16A34A]'
                   }`}
               >
                 <Banknote className="w-3.5 h-3.5" />
@@ -2334,8 +2316,8 @@ export default function ManagerOrderPortal() {
               <button
                 onClick={() => setHistoryFilterPayment('UPI')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${historyFilterPayment === 'UPI'
-                    ? 'bg-[#2563EB] text-white shadow-xs'
-                    : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#2563EB]'
+                  ? 'bg-[#2563EB] text-white shadow-xs'
+                  : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#2563EB]'
                   }`}
               >
                 <QrCode className="w-3.5 h-3.5" />
@@ -2345,8 +2327,8 @@ export default function ManagerOrderPortal() {
               <button
                 onClick={() => setHistoryFilterPayment('Card')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${historyFilterPayment === 'Card'
-                    ? 'bg-[#7C3AED] text-white shadow-xs'
-                    : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#7C3AED]'
+                  ? 'bg-[#7C3AED] text-white shadow-xs'
+                  : 'bg-[#F1F5F9] text-[#64748B] hover:text-[#7C3AED]'
                   }`}
               >
                 <CreditCard className="w-3.5 h-3.5" />
@@ -2461,8 +2443,8 @@ export default function ManagerOrderPortal() {
                         <button
                           onClick={() => handleUpdateOrderPaymentMethod(order.id, 'Cash')}
                           className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${isCash
-                              ? 'bg-[#16A34A] text-white shadow-xs'
-                              : 'text-[#64748B] hover:text-[#0B1B29]'
+                            ? 'bg-[#16A34A] text-white shadow-xs'
+                            : 'text-[#64748B] hover:text-[#0B1B29]'
                             }`}
                           title="Set payment mode as Cash"
                         >
@@ -2473,8 +2455,8 @@ export default function ManagerOrderPortal() {
                         <button
                           onClick={() => handleUpdateOrderPaymentMethod(order.id, 'UPI')}
                           className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${isUPI
-                              ? 'bg-[#2563EB] text-white shadow-xs'
-                              : 'text-[#64748B] hover:text-[#0B1B29]'
+                            ? 'bg-[#2563EB] text-white shadow-xs'
+                            : 'text-[#64748B] hover:text-[#0B1B29]'
                             }`}
                           title="Set payment mode as UPI"
                         >
@@ -2485,8 +2467,8 @@ export default function ManagerOrderPortal() {
                         <button
                           onClick={() => handleUpdateOrderPaymentMethod(order.id, 'Card')}
                           className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${isCard
-                              ? 'bg-[#7C3AED] text-white shadow-xs'
-                              : 'text-[#64748B] hover:text-[#0B1B29]'
+                            ? 'bg-[#7C3AED] text-white shadow-xs'
+                            : 'text-[#64748B] hover:text-[#0B1B29]'
                             }`}
                           title="Set payment mode as Card"
                         >
@@ -2629,8 +2611,8 @@ export default function ManagerOrderPortal() {
               <button
                 onClick={() => setMasterSubTab('otps')}
                 className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${masterSubTab === 'otps'
-                    ? 'bg-[#0B1B29] text-white shadow-xs'
-                    : 'text-[#64748B] hover:text-[#0B1B29] hover:bg-[#F8FAFC]'
+                  ? 'bg-[#0B1B29] text-white shadow-xs'
+                  : 'text-[#64748B] hover:text-[#0B1B29] hover:bg-[#F8FAFC]'
                   }`}
               >
                 <Smartphone className="w-4 h-4" />
@@ -2649,8 +2631,8 @@ export default function ManagerOrderPortal() {
                   setCreatedLoginSuccess(null);
                 }}
                 className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${masterSubTab === 'create_login'
-                    ? 'bg-[#0B1B29] text-white shadow-xs'
-                    : 'text-[#64748B] hover:text-[#0B1B29] hover:bg-[#F8FAFC]'
+                  ? 'bg-[#0B1B29] text-white shadow-xs'
+                  : 'text-[#64748B] hover:text-[#0B1B29] hover:bg-[#F8FAFC]'
                   }`}
               >
                 <UserPlus className="w-4 h-4" />
@@ -2660,8 +2642,8 @@ export default function ManagerOrderPortal() {
               <button
                 onClick={() => setMasterSubTab('logins')}
                 className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all ${masterSubTab === 'logins'
-                    ? 'bg-[#0B1B29] text-white shadow-xs'
-                    : 'text-[#64748B] hover:text-[#0B1B29] hover:bg-[#F8FAFC]'
+                  ? 'bg-[#0B1B29] text-white shadow-xs'
+                  : 'text-[#64748B] hover:text-[#0B1B29] hover:bg-[#F8FAFC]'
                   }`}
               >
                 <HardDrive className="w-4 h-4" />
@@ -2779,8 +2761,8 @@ export default function ManagerOrderPortal() {
                                   setTimeout(() => setMasterOtpCopied(null), 2000);
                                 }}
                                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs ${isCopied
-                                    ? 'bg-emerald-600 text-white'
-                                    : 'bg-[#0B1B29] hover:bg-[#1E293B] text-white'
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-[#0B1B29] hover:bg-[#1E293B] text-white'
                                   }`}
                               >
                                 {isCopied ? (
@@ -3176,8 +3158,8 @@ export default function ManagerOrderPortal() {
                 <button
                   onClick={() => handleUpdatePaperWidth('58mm')}
                   className={`py-2 rounded-lg text-xs font-bold transition-all ${activePrinter.paperWidth === '58mm'
-                      ? 'bg-[#0B1B29] text-white shadow-xs'
-                      : 'text-[#64748B] hover:text-[#0B1B29]'
+                    ? 'bg-[#0B1B29] text-white shadow-xs'
+                    : 'text-[#64748B] hover:text-[#0B1B29]'
                     }`}
                 >
                   58mm (2-inch Pocket Roll)
@@ -3185,8 +3167,8 @@ export default function ManagerOrderPortal() {
                 <button
                   onClick={() => handleUpdatePaperWidth('80mm')}
                   className={`py-2 rounded-lg text-xs font-bold transition-all ${activePrinter.paperWidth === '80mm'
-                      ? 'bg-[#0B1B29] text-white shadow-xs'
-                      : 'text-[#64748B] hover:text-[#0B1B29]'
+                    ? 'bg-[#0B1B29] text-white shadow-xs'
+                    : 'text-[#64748B] hover:text-[#0B1B29]'
                     }`}
                 >
                   80mm (3-inch Counter Roll)
@@ -3287,8 +3269,8 @@ export default function ManagerOrderPortal() {
                         key={printer.id}
                         onClick={() => saveAndActivatePrinter(printer)}
                         className={`cursor-pointer border rounded-xl p-3 flex items-center justify-between transition-all ${isSelected
-                            ? 'border-[#16A34A] bg-[#F0FDF4]'
-                            : 'border-[#E2E8F0] hover:border-[#CBD5E1] bg-white'
+                          ? 'border-[#16A34A] bg-[#F0FDF4]'
+                          : 'border-[#E2E8F0] hover:border-[#CBD5E1] bg-white'
                           }`}
                       >
                         <div className="flex items-center gap-2.5">
@@ -3389,8 +3371,8 @@ export default function ManagerOrderPortal() {
                   type="button"
                   onClick={() => setIsTemplateEditorOpen((prev) => !prev)}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${isTemplateEditorOpen
-                      ? 'border-[#D92F43] bg-[#FFF1F2] text-[#D92F43]'
-                      : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
+                    ? 'border-[#D92F43] bg-[#FFF1F2] text-[#D92F43]'
+                    : 'border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B] hover:text-[#0B1B29]'
                     }`}
                   title="Customize Owner Saved Template"
                 >
