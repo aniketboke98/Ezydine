@@ -397,24 +397,37 @@ router.post('/', async (req: Request, res: Response) => {
     const defaultMatch = printersOutput.match(/system default destination:\s*([^\n\r]+)/);
     const systemDefault = defaultMatch && defaultMatch[1] ? defaultMatch[1].trim() : (validPrinters[0] || '');
 
+    // Detect physically connected USB hardware printer first
+    const usbPrinters = await getConnectedUsbPrinters();
+    const activeUsb = usbPrinters.find(u => u.isThermal) || usbPrinters[0];
+
     let targetPrinter = printerName ? String(printerName).trim() : '';
 
-    // If no printer requested or generic placeholder, use default
+    // If target matches KPrint / Printe or if no target provided, prioritize connected USB printer
+    if (activeUsb) {
+      const usbNameClean = activeUsb.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const cleanReq = targetPrinter.toLowerCase().replace(/[^a-z0-9]/g, '');
+      
+      // If user requested KPrint/Printe or auto/default, bind directly to the connected USB printer queue
+      if (!targetPrinter || targetPrinter.includes('Default') || targetPrinter === 'Auto-Detect' || cleanReq.includes('kprint') || cleanReq.includes('printe')) {
+        const matchingQueue = validPrinters.find(p => {
+          const pClean = p.toLowerCase().replace(/[^a-z0-9]/g, '');
+          return pClean.includes(usbNameClean) || usbNameClean.includes(pClean);
+        });
+        targetPrinter = matchingQueue || 'Printe_KPrinte';
+      }
+    }
+
+    // Fallback resolution against valid CUPS printers
     if (!targetPrinter || targetPrinter.includes('Default') || targetPrinter === 'Auto-Detect') {
       targetPrinter = systemDefault;
     } else if (!validPrinters.includes(targetPrinter)) {
-      // Find exact or closest match in valid CUPS printers (e.g. "KPrinte" -> "Printe_KPrinte" / "Printer_POS_58")
       const cleanTarget = targetPrinter.toLowerCase().replace(/[^a-z0-9]/g, '');
       const matched = validPrinters.find(p => {
         const cleanP = p.toLowerCase().replace(/[^a-z0-9]/g, '');
         return cleanP === cleanTarget || cleanP.includes(cleanTarget) || cleanTarget.includes(cleanP);
       });
       targetPrinter = matched || systemDefault;
-    }
-
-    // If targetPrinter resolved to Printe_KPrinte (generic postscript) and Printer_POS_58 exists (actual POS-58 driver), prefer Printer_POS_58
-    if ((targetPrinter === 'Printe_KPrinte' || targetPrinter.toLowerCase().includes('kprinte')) && validPrinters.includes('Printer_POS_58')) {
-      targetPrinter = 'Printer_POS_58';
     }
 
     if (!targetPrinter) {
@@ -445,7 +458,6 @@ router.post('/', async (req: Request, res: Response) => {
     let dispatchOutput = '';
 
     // Strategy 1: On macOS, check if direct USB connection exists for hardware thermal printing
-    const usbPrinters = await getConnectedUsbPrinters();
     let directUsbUri = '';
     for (const u of usbPrinters) {
       const uLower = u.name.toLowerCase().replace(/[^a-z0-9]/g, '');

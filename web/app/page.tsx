@@ -246,9 +246,9 @@ export default function ManagerOrderPortal() {
   // Hardware Printer State
   const [pairedPrinters, setPairedPrinters] = useState<RealPrinterDevice[]>([]);
   const [activePrinter, setActivePrinter] = useState<RealPrinterDevice>({
-    id: 'sys_Printer_POS_58',
-    name: 'Printer_POS_58',
-    connectionType: 'system',
+    id: 'sys_Printe_KPrinte',
+    name: 'Printe_KPrinte',
+    connectionType: 'usb',
     paperWidth: '58mm',
     status: 'connected',
   });
@@ -865,16 +865,27 @@ export default function ManagerOrderPortal() {
         setPairedPrinters(discoveredPrinters);
         localStorage.setItem('ezydine_real_printers', JSON.stringify(discoveredPrinters));
 
-        // Auto-select system default printer
+        // Prioritize physically connected USB device (e.g. KPrint / Printe_KPrinte)
+        const connectedUsb = data.usbPrinters && data.usbPrinters.length > 0 ? data.usbPrinters[0] : null;
         const defaultSys = data.printers.find((p: any) => p.isDefault) || data.printers[0];
+        let chosenPrinter = defaultSys;
+
+        if (connectedUsb) {
+          const usbName = connectedUsb.name.replace(/[^a-zA-Z0-9]/g, '_');
+          const matchedUsbQueue = discoveredPrinters.find(p => p.name === usbName || p.name.includes('Printe') || p.name.includes('KPrint'));
+          if (matchedUsbQueue) {
+            chosenPrinter = matchedUsbQueue;
+          }
+        }
+
         setActivePrinter((prev) => {
           const match = discoveredPrinters.find((dp) => dp.name === prev.name);
           if (match && !match.name.includes('Default System Spooler')) return match;
           const defaultDev: RealPrinterDevice = {
-            id: `sys_${defaultSys.name}`,
-            name: defaultSys.name,
-            connectionType: 'system',
-            paperWidth: defaultSys.name.toLowerCase().includes('80') ? '80mm' : '58mm',
+            id: `sys_${chosenPrinter.name}`,
+            name: chosenPrinter.name,
+            connectionType: 'usb',
+            paperWidth: chosenPrinter.name.toLowerCase().includes('80') ? '80mm' : '58mm',
             status: 'connected',
           };
           localStorage.setItem('ezydine_active_printer', JSON.stringify(defaultDev));
