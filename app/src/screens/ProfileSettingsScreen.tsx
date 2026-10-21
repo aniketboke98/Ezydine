@@ -54,7 +54,7 @@ export const ProfileSettingsScreen: React.FC<ProfileSettingsScreenProps> = ({
   const [gstConfig, setGstConfig] = useState<GSTConfig>({
     enabled: true,
     gstRate: 5,
-    gstin: '29AABCT1332L1Z4',
+    gstin: '',
     showBreakdownOnBill: true,
     hsnCode: '9963',
   });
@@ -76,8 +76,14 @@ export const ProfileSettingsScreen: React.FC<ProfileSettingsScreenProps> = ({
     gstRate: '5.0',
     gstNumber: '',
   });
+  const [currentUser, setCurrentUser] = useState<any>(null);
 
   useEffect(() => {
+    // 0. Load logged-in user profile
+    api.getUser().then((u) => {
+      if (u) setCurrentUser(u);
+    }).catch(() => null);
+
     // 1. Quick load from local cache
     api.getRestaurant().then((cached) => {
       if (cached) {
@@ -266,7 +272,11 @@ export const ProfileSettingsScreen: React.FC<ProfileSettingsScreenProps> = ({
               </TouchableOpacity>
               <View>
                 <Text style={styles.title}>Profile & settings</Text>
-                <Text style={styles.subtitle}>Arjun Sharma · Owner</Text>
+                <Text style={styles.subtitle}>
+                  {currentUser?.name || currentUser?.fullName
+                    ? `${currentUser.name || currentUser.fullName} · ${currentUser.role || 'Owner'}`
+                    : 'Manager Account'}
+                </Text>
               </View>
             </View>
 
@@ -302,14 +312,14 @@ export const ProfileSettingsScreen: React.FC<ProfileSettingsScreenProps> = ({
               </TouchableOpacity>
               <View style={{ flex: 1 }}>
                 <View style={styles.nameLockRow}>
-                  <Text style={styles.outletName}>{profile.name || 'The Curry House'}</Text>
+                  <Text style={styles.outletName}>{profile.name || 'Restaurant'}</Text>
                   <View style={styles.verifiedPill}>
                     <Ionicons name="shield-checkmark" size={12} color={Colors.successGreen} />
                     <Text style={styles.verifiedText}>Verified</Text>
                   </View>
                 </View>
                 <Text style={styles.outletPhone}>
-                  {profile.location || 'Indiranagar, Bengaluru'} · {profile.phone || '080 4123 4567'}
+                  {[profile.location, profile.phone].filter(Boolean).join(' · ') || 'No contact specified'}
                 </Text>
               </View>
             </View>

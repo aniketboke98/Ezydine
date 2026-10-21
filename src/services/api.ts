@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 export const PRIMARY_URL = 'https://api.ezydine.in/api';
 export const LOCAL_DEV_URL = Platform.select({
   android: 'http://10.0.2.2:5001/api',
-  default: 'http://localhost:5001/api',
+  default: 'https://api.ezydine.in/api',
 });
 
 let currentBaseUrl = __DEV__ ? (LOCAL_DEV_URL || PRIMARY_URL) : PRIMARY_URL;

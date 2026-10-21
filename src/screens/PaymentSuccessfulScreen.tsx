@@ -1,5 +1,5 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
+import { api, safeStorage } from '../services/api';
 
 interface PaymentSuccessfulScreenProps {
   onGoToDashboard: () => void;
@@ -20,6 +21,33 @@ export const PaymentSuccessfulScreen: React.FC<PaymentSuccessfulScreenProps> = (
   onGoToDashboard,
   onBack,
 }) => {
+  const [restaurantName, setRestaurantName] = useState('Restaurant');
+  const [planName, setPlanName] = useState('Standard Plan');
+  const [amountPaid, setAmountPaid] = useState('2,999.00');
+
+  useEffect(() => {
+    api.getRestaurant().then((cached) => {
+      if (cached && (cached.name || cached.restaurant_name)) {
+        setRestaurantName(cached.name || cached.restaurant_name);
+      }
+    }).catch(() => null);
+
+    safeStorage.getItem('@ezydine_plan_data').then((raw) => {
+      if (raw) {
+        try {
+          const p = JSON.parse(raw);
+          if (p.name) setPlanName(p.name);
+          if (p.price) setAmountPaid(Number(p.price).toFixed(2));
+        } catch {}
+      }
+    }).catch(() => null);
+  }, []);
+
+  const todayStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  const validThroughDate = new Date();
+  validThroughDate.setDate(validThroughDate.getDate() + 30);
+  const validThroughStr = validThroughDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
@@ -54,43 +82,39 @@ export const PaymentSuccessfulScreen: React.FC<PaymentSuccessfulScreenProps> = (
 
             <Text style={styles.heroTitle}>You’re ready for service.</Text>
             <Text style={styles.heroSubtitle}>
-              Payment confirmed. Growth is now active for The Curry House.
+              Payment confirmed. {planName} is now active for {restaurantName}.
             </Text>
           </View>
 
           {/* Details Card */}
           <View style={styles.card}>
             <View style={styles.cardRow}>
-              <Text style={styles.planName}>Growth · Monthly</Text>
+              <Text style={styles.planName}>{planName} · Monthly</Text>
               <View style={styles.activeBadge}>
                 <Text style={styles.activeBadgeText}>Active</Text>
               </View>
             </View>
 
             <View style={styles.amountRow}>
-              <Text style={styles.methodLabel}>Amount paid · UPI</Text>
-              <Text style={styles.amountVal}>₹2,122.94</Text>
+              <Text style={styles.methodLabel}>Amount paid · UPI / Online</Text>
+              <Text style={styles.amountVal}>₹{amountPaid}</Text>
             </View>
-
-            <Text style={styles.taxSavingsNote}>
-              Includes ₹323.84 GST · SAVE10 saved ₹199.90
-            </Text>
 
             <View style={styles.divider} />
 
             <View style={styles.metaRow}>
               <Text style={styles.metaLabel}>Activated</Text>
-              <Text style={styles.metaVal}>18 Oct 2026</Text>
+              <Text style={styles.metaVal}>{todayStr}</Text>
             </View>
 
             <View style={styles.metaRow}>
               <Text style={styles.metaLabel}>Valid through</Text>
-              <Text style={styles.metaVal}>17 Nov 2026</Text>
+              <Text style={styles.metaVal}>{validThroughStr}</Text>
             </View>
 
             <View style={styles.metaRow}>
               <Text style={styles.metaLabel}>Transaction reference</Text>
-              <Text style={styles.metaVal}>ED2610180842</Text>
+              <Text style={styles.metaVal}>TXN-{Date.now().toString().slice(-8)}</Text>
             </View>
           </View>
 

@@ -29,49 +29,6 @@ interface StaffManagementModalProps {
   onClose: () => void;
 }
 
-const INITIAL_STAFF: StaffMember[] = [
-  {
-    id: 'staff_1',
-    name: 'Arjun Sharma',
-    phone: '+91 98765 43210',
-    role: 'Owner',
-    pin: '1234',
-    active: true,
-    canEditMenu: true,
-    canAccessReports: true,
-  },
-  {
-    id: 'staff_2',
-    name: 'Priya Verma',
-    phone: '+91 98451 22334',
-    role: 'Cashier',
-    pin: '2345',
-    active: true,
-    canEditMenu: false,
-    canAccessReports: false,
-  },
-  {
-    id: 'staff_3',
-    name: 'Chef Ramesh',
-    phone: '+91 97312 88765',
-    role: 'Chef',
-    pin: '3456',
-    active: true,
-    canEditMenu: false,
-    canAccessReports: false,
-  },
-  {
-    id: 'staff_4',
-    name: 'Suresh Kumar',
-    phone: '+91 99160 55432',
-    role: 'Waiter',
-    pin: '4567',
-    active: true,
-    canEditMenu: false,
-    canAccessReports: false,
-  },
-];
-
 export const StaffManagementModal: React.FC<StaffManagementModalProps> = ({
   visible,
   onClose,

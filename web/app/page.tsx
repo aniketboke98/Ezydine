@@ -138,7 +138,7 @@ const getApiBaseUrl = () => {
   if (process.env.NEXT_PUBLIC_API_URL) {
     return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '');
   }
-  return 'http://localhost:5001/api';
+  return 'https://api.ezydine.in/api';
 };
 
 const apiFetch = async (endpoint: string, options: RequestInit = {}): Promise<Response> => {
@@ -157,7 +157,7 @@ const printApiFetch = async (endpoint: string, options: RequestInit = {}): Promi
     try {
       const localController = new AbortController();
       const localTimeout = setTimeout(() => localController.abort(), 1200);
-      const localRes = await fetch(`http://localhost:5001/api${path}`, {
+      const localRes = await fetch(`https://api.ezydine.in/api${path}`, {
         ...options,
         signal: localController.signal,
       });
@@ -173,22 +173,18 @@ const printApiFetch = async (endpoint: string, options: RequestInit = {}): Promi
   return await apiFetch(endpoint, options);
 };
 
-const DEFAULT_FLOOR_TABLES: Table[] = [
-  { id: 't1', number: '01', capacity: 2, section: 'Dine-In', status: 'available' },
-  { id: 't2', number: '02', capacity: 4, section: 'Dine-In', status: 'available' },
-  { id: 't3', number: '03', capacity: 4, section: 'Dine-In', status: 'available' },
-  { id: 't4', number: '04', capacity: 6, section: 'Dine-In', status: 'available' },
-  { id: 't5', number: '05', capacity: 2, section: 'Dine-In', status: 'available' },
-  { id: 't6', number: '06', capacity: 4, section: 'Dine-In', status: 'available' },
-  { id: 't7', number: 'VIP-1', capacity: 8, section: 'VIP Lounge', status: 'available' },
-  { id: 't8', number: 'VIP-2', capacity: 10, section: 'VIP Lounge', status: 'available' },
-  { id: 't9', number: 'T-01', capacity: 4, section: 'Terrace', status: 'available' },
-  { id: 't10', number: 'T-02', capacity: 4, section: 'Terrace', status: 'available' },
-  { id: 't11', number: 'TK-1', capacity: 0, section: 'Takeaway', status: 'available' },
-];
-
-const DEFAULT_MENU_ITEMS: MenuItem[] = [
-  // South Indian
+const FALLBACK_FLOOR_TABLES: Table[] = [
+  { id: '1', number: '01', capacity: 2, section: 'Dine-In', status: 'available' },
+  { id: '2', number: '02', capacity: 4, section: 'Dine-In', status: 'available' },
+  { id: '3', number: '03', capacity: 4, section: 'Dine-In', status: 'available' },
+  { id: '4', number: '04', capacity: 6, section: 'Dine-In', status: 'available' },
+  { id: '5', number: '05', capacity: 2, section: 'Dine-In', status: 'available' },
+  { id: '6', number: '06', capacity: 4, section: 'Dine-In', status: 'available' },
+  { id: '7', number: 'VIP-1', capacity: 8, section: 'VIP Lounge', status: 'available' },
+  { id: '8', number: 'VIP-2', capacity: 10, section: 'VIP Lounge', status: 'available' },
+  { id: '9', number: 'T-01', capacity: 4, section: 'Terrace', status: 'available' },
+  { id: '10', number: 'T-02', capacity: 4, section: 'Terrace', status: 'available' },
+  { id: '11', number: 'TK-1', capacity: 0, section: 'Takeaway', status: 'available' },
 ];
 
 export default function ManagerOrderPortal() {
@@ -225,13 +221,13 @@ export default function ManagerOrderPortal() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Database-Synced Menu Items for this Manager's Restaurant
-  const [menuItems, setMenuItems] = useState<MenuItem[]>(DEFAULT_MENU_ITEMS);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [isMenuLoading, setIsMenuLoading] = useState(false);
 
   // Tables State & Table Orders Map (Stores active draft/placed order per table)
-  const [floorTables, setFloorTables] = useState<Table[]>(DEFAULT_FLOOR_TABLES);
+  const [floorTables, setFloorTables] = useState<Table[]>(FALLBACK_FLOOR_TABLES);
   const [tableOrders, setTableOrders] = useState<Record<string, TableOrderDraft>>({});
-  const [selectedTable, setSelectedTable] = useState<Table>(DEFAULT_FLOOR_TABLES[0]);
+  const [selectedTable, setSelectedTable] = useState<Table>(FALLBACK_FLOOR_TABLES[0]);
 
   // Order & Cart State (Active table's draft)
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -264,7 +260,7 @@ export default function ManagerOrderPortal() {
 
   // Print Mode State ('bill' | 'kot') & Print Target Data
   const [activePrintMode, setActivePrintMode] = useState<'bill' | 'kot'>('bill');
-  const [kotTokenNumber, setKotTokenNumber] = useState<number>(101);
+  const [kotTokenNumber, setKotTokenNumber] = useState<number>(0);
   const [printStatusMessage, setPrintStatusMessage] = useState<string | null>(null);
   const [reprintTargetOrder, setReprintTargetOrder] = useState<OrderHistoryItem | null>(null);
 
@@ -317,6 +313,8 @@ export default function ManagerOrderPortal() {
         setManagerSession(parsed);
         currentRestId = parsed.restaurantId;
         fetchRestaurantMenu(parsed.token);
+        fetchRestaurantTables(parsed.token, parsed.restaurantId);
+        fetchOrderHistory(parsed.token, parsed.restaurantId);
 
         // Load order history for this restaurant
         const historyKey = `ezydine_order_history_${parsed.restaurantId || 'default'}`;
@@ -346,9 +344,9 @@ export default function ManagerOrderPortal() {
       // 2. Load saved selected table
       const selKey = getSelectedTableIdKey(currentRestId);
       const storedSelectedId = localStorage.getItem(selKey);
-      let initialTable = DEFAULT_FLOOR_TABLES[0];
+      let initialTable = FALLBACK_FLOOR_TABLES[0];
       if (storedSelectedId) {
-        const found = DEFAULT_FLOOR_TABLES.find((t) => String(t.id) === String(storedSelectedId));
+        const found = FALLBACK_FLOOR_TABLES.find((t) => String(t.id) === String(storedSelectedId));
         if (found) initialTable = found;
       }
       setSelectedTable(initialTable);
@@ -365,7 +363,7 @@ export default function ManagerOrderPortal() {
 
       // 4. Update floor tables so all tables with items show as occupied with correct count & amount!
       setFloorTables(
-        DEFAULT_FLOOR_TABLES.map((t) => {
+        FALLBACK_FLOOR_TABLES.map((t) => {
           const d = loadedTableOrders[t.id];
           const hasItems = d && d.cart && d.cart.length > 0;
           const count = hasItems ? d.cart.reduce((sum, item) => sum + item.quantity, 0) : 0;
@@ -549,19 +547,122 @@ export default function ManagerOrderPortal() {
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.items)) {
-        if (data.items.length > 0) {
-          const complementary = DEFAULT_MENU_ITEMS.filter(
-            (d) => !data.items.some((i: any) => i.name.toLowerCase() === d.name.toLowerCase())
-          );
-          setMenuItems([...data.items, ...complementary]);
-        } else {
-          setMenuItems(DEFAULT_MENU_ITEMS);
-        }
+        setMenuItems(data.items);
+      } else {
+        setMenuItems([]);
       }
     } catch (e) {
       console.warn('Failed to fetch menu items from backend:', e);
+      setMenuItems([]);
     } finally {
       setIsMenuLoading(false);
+    }
+  };
+
+  // Fetch PostgreSQL Floor Tables for this Restaurant
+  const fetchRestaurantTables = async (token: string, restId?: number) => {
+    try {
+      const res = await apiFetch('/tables', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.tables) && data.tables.length > 0) {
+        const ordersKey = getTableOrdersKey(restId);
+        const storedTableOrders = localStorage.getItem(ordersKey);
+        let loadedOrders: Record<string, TableOrderDraft> = {};
+        if (storedTableOrders) {
+          try {
+            loadedOrders = JSON.parse(storedTableOrders);
+          } catch { }
+        }
+
+        const mappedTables: Table[] = data.tables.map((t: any) => {
+          const tableIdStr = String(t.id);
+          const d = loadedOrders[tableIdStr];
+          const hasItems = d && d.cart && d.cart.length > 0;
+          const count = hasItems ? d.cart.reduce((sum, item) => sum + item.quantity, 0) : (t.activeAmount > 0 ? 1 : 0);
+          const sub = hasItems ? d.cart.reduce((sum, item) => sum + item.price * item.quantity, 0) : Number(t.activeAmount || 0);
+
+          return {
+            id: tableIdStr,
+            number: String(t.tableNumber || t.id).replace(/^Table\s*/i, ''),
+            capacity: t.seats || 4,
+            section: t.section || 'Dine-In',
+            status: (hasItems || t.status === 'occupied' ? 'occupied' : 'available') as 'available' | 'occupied',
+            activeItemsCount: count,
+            activeTotal: sub,
+            kotToken: d?.kotToken,
+            placedAt: d?.placedAt || t.activeTime,
+          };
+        });
+
+        setFloorTables(mappedTables);
+        setSelectedTable((prev) => {
+          const found = mappedTables.find((mt) => String(mt.id) === String(prev.id));
+          return found || mappedTables[0];
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to fetch tables from backend:', e);
+    }
+  };
+
+  // Fetch PostgreSQL Completed Bills (Order Done Data) for Manager View
+  const fetchOrderHistory = async (token: string, restId?: number) => {
+    try {
+      const res = await apiFetch('/bills', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.bills)) {
+        const formattedBills: OrderHistoryItem[] = data.bills.map((b: any, idx: number) => {
+          const createdAt = b.date ? new Date(b.date) : new Date();
+          const cleanNum = b.billNumber ? String(b.billNumber).replace(/^(Order\s*#?|#)/i, '').trim() : String(data.bills.length - idx);
+          const tokenNum = parseInt(cleanNum, 10) || (data.bills.length - idx);
+
+          return {
+            id: String(b.id || `bill_${idx}`),
+            billNumber: `Order #${cleanNum || (data.bills.length - idx)}`,
+            kotToken: tokenNum,
+            tableId: String(b.tableNumber || '01'),
+            tableNumber: String(b.tableNumber || '01').replace(/^Table\s*/i, ''),
+            tableSection: b.orderType || 'Dine-In',
+            customerName: b.customerName || undefined,
+            customerPhone: b.customerPhone || undefined,
+            serverName: 'Manager',
+            items: (b.items || []).map((it: any) => ({
+              id: it.id,
+              name: it.name,
+              price: Number(it.price || 0),
+              quantity: Number(it.quantity || 1),
+              category: it.category || 'Mains',
+              isVeg: it.isVeg !== false,
+            })),
+            subtotal: Number(b.subtotal || 0),
+            discount: Number(b.discount || 0),
+            cgst: Number(b.gstAmount ? b.gstAmount / 2 : 0),
+            sgst: Number(b.gstAmount ? b.gstAmount / 2 : 0),
+            grandTotal: Number(b.totalAmount || b.amount || 0),
+            paymentMethod: (b.paymentMethod || 'UPI') as any,
+            createdAt: b.date || createdAt.toISOString(),
+            formattedDate: b.date || createdAt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+            formattedTime: b.time || createdAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+            status: 'billed',
+          };
+        });
+
+        setOrderHistory(formattedBills);
+        const historyKey = `ezydine_order_history_${restId || 'default'}`;
+        localStorage.setItem(historyKey, JSON.stringify(formattedBills));
+      }
+    } catch (e) {
+      console.warn('Failed to fetch bills from server:', e);
     }
   };
 
@@ -596,10 +697,10 @@ export default function ManagerOrderPortal() {
           identifier: loginIdentifier.trim(),
           restaurantId: data.restaurant?.id,
           restaurantName: data.restaurant?.name || 'Restaurant',
-          restaurantLocation: data.restaurant?.location || 'Indiranagar, Bengaluru',
+          restaurantLocation: data.restaurant?.location || '',
           restaurantPhone: data.restaurant?.phone || '',
-          gstNumber: data.restaurant?.gstNumber || '29AABCT1332L1Z4',
-          fssai: data.restaurant?.fssai || '11223344556677',
+          gstNumber: data.restaurant?.gstNumber || '',
+          fssai: data.restaurant?.fssai || '',
         };
         setManagerSession(session);
         localStorage.setItem('ezydine_manager_session', JSON.stringify(session));
@@ -630,9 +731,9 @@ export default function ManagerOrderPortal() {
 
         const selKey = getSelectedTableIdKey(session.restaurantId);
         const storedSelId = localStorage.getItem(selKey);
-        let curTable = DEFAULT_FLOOR_TABLES[0];
+        let curTable = FALLBACK_FLOOR_TABLES[0];
         if (storedSelId) {
-          const found = DEFAULT_FLOOR_TABLES.find((t) => String(t.id) === String(storedSelId));
+          const found = FALLBACK_FLOOR_TABLES.find((t) => String(t.id) === String(storedSelId));
           if (found) curTable = found;
         }
         setSelectedTable(curTable);
@@ -652,7 +753,7 @@ export default function ManagerOrderPortal() {
         }
 
         setFloorTables(
-          DEFAULT_FLOOR_TABLES.map((t) => {
+          FALLBACK_FLOOR_TABLES.map((t) => {
             const d = loadedOrders[t.id];
             const hasItems = d && d.cart && d.cart.length > 0;
             const count = hasItems ? d.cart.reduce((sum, item) => sum + item.quantity, 0) : 0;
@@ -684,6 +785,8 @@ export default function ManagerOrderPortal() {
         }
 
         fetchRestaurantMenu(data.token);
+        fetchRestaurantTables(data.token, session.restaurantId);
+        fetchOrderHistory(data.token, session.restaurantId);
       } else {
         setLoginError(
           data.error ||
@@ -704,8 +807,8 @@ export default function ManagerOrderPortal() {
       localStorage.removeItem('ezydine_manager_session');
       setCart([]);
       setTableOrders({});
-      setFloorTables(DEFAULT_FLOOR_TABLES);
-      setSelectedTable(DEFAULT_FLOOR_TABLES[0]);
+      setFloorTables(FALLBACK_FLOOR_TABLES);
+      setSelectedTable(FALLBACK_FLOOR_TABLES[0]);
       setMenuItems([]);
       setLoginPin('');
     }
@@ -971,7 +1074,8 @@ export default function ManagerOrderPortal() {
       alert('Order is empty. Please add items before placing order & printing KOT.');
       return;
     }
-    const token = kotTokenNumber + 1;
+    const existingToken = tableOrders[selectedTable.id]?.kotToken;
+    const token = existingToken || (orderHistory.length + 1);
     setKotTokenNumber(token);
 
     // 1. Update Table Status to Occupied with active item count and amount
@@ -1041,8 +1145,9 @@ export default function ManagerOrderPortal() {
       return;
     }
 
-    const billNum = `BILL #${Math.floor(1000 + Math.random() * 9000)}`;
-    const token = kotTokenNumber + 1;
+    const nextOrderNumber = orderHistory.length + 1;
+    const billNum = `Order #${nextOrderNumber}`;
+    const token = tableOrders[selectedTable.id]?.kotToken || nextOrderNumber;
     setKotTokenNumber(token);
 
     const now = new Date();
@@ -1108,7 +1213,7 @@ export default function ManagerOrderPortal() {
     setPrintStatusMessage(`Bill ${billNum} generated in Owner Saved Template`);
     setTimeout(() => setPrintStatusMessage(null), 3000);
 
-    // Optionally sync to backend
+    // Sync bill to backend and refresh order history
     if (managerSession) {
       try {
         apiFetch('/bills', {
@@ -1118,13 +1223,19 @@ export default function ManagerOrderPortal() {
             'Authorization': `Bearer ${managerSession.token}`,
           },
           body: JSON.stringify({
+            billNumber: newOrder.billNumber,
+            kotNumber: `KOT #${newOrder.kotToken}`,
             tableNumber: selectedTable.number,
             items: newOrder.items,
             subtotal: newOrder.subtotal,
             discount: newOrder.discount,
             gstAmount: newOrder.cgst + newOrder.sgst,
             totalAmount: newOrder.grandTotal,
+            paymentStatus: 'paid',
+            paymentMethod: newOrder.paymentMethod,
           }),
+        }).then(() => {
+          fetchOrderHistory(managerSession.token, managerSession.restaurantId);
         }).catch((err) => console.warn('Could not sync bill to backend:', err));
       } catch (e) {
         // non-blocking
@@ -1173,9 +1284,9 @@ export default function ManagerOrderPortal() {
         (order.specialNote ? `Chef Note: ${order.specialNote}\n` : '') +
         `*** SEND TO KITCHEN PREPARATION ***`;
     } else {
-      text = `${managerSession.restaurantName}\n${managerSession.restaurantLocation}\nPh: ${managerSession.restaurantPhone || ''}\n` +
-        (ownerTemplate.showGst ? `GSTIN: ${managerSession.gstNumber || '29AABCT1332L1Z4'}\n` : '') +
-        (ownerTemplate.showFssai ? `FSSAI: ${managerSession.fssai || '11223344556677'}\n` : '') +
+      text = `${managerSession.restaurantName}\n${managerSession.restaurantLocation ? managerSession.restaurantLocation + '\n' : ''}${managerSession.restaurantPhone ? `Ph: ${managerSession.restaurantPhone}\n` : ''}` +
+        (ownerTemplate.showGst && managerSession.gstNumber ? `GSTIN: ${managerSession.gstNumber}\n` : '') +
+        (ownerTemplate.showFssai && managerSession.fssai ? `FSSAI: ${managerSession.fssai}\n` : '') +
         `--------------------------------\n` +
         `${order.billNumber} | Table ${order.tableNumber} (${order.tableSection})\n` +
         `Date: ${order.formattedDate} ${order.formattedTime}\n` +
@@ -1398,6 +1509,16 @@ export default function ManagerOrderPortal() {
       return () => clearInterval(interval);
     }
   }, [currentView]);
+
+  // Live Listener for Completed ("Order Done") Bills for Manager - auto-syncs every 4s and on view change
+  useEffect(() => {
+    if (!managerSession?.token) return;
+    fetchOrderHistory(managerSession.token, managerSession.restaurantId);
+    const interval = setInterval(() => {
+      fetchOrderHistory(managerSession.token, managerSession.restaurantId);
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [managerSession?.token, managerSession?.restaurantId, currentView]);
 
   // Update Payment Method for an existing order in Order History (Cash / UPI / Card)
   const handleUpdateOrderPaymentMethod = (orderId: string, newMethod: 'Cash' | 'UPI' | 'Card') => {
@@ -2218,6 +2339,10 @@ export default function ManagerOrderPortal() {
                 <span className="px-2 py-0.5 text-xs font-bold bg-[#EEF2FF] text-[#2563EB] rounded-md">
                   {orderHistory.length} Total Orders
                 </span>
+                <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>LIVE LISTENER</span>
+                </span>
               </div>
               <p className="text-xs text-[#64748B] mt-1">
                 Print completed bills, reprint KOTs, or update payment mode (Cash, UPI, Card).
@@ -2225,6 +2350,17 @@ export default function ManagerOrderPortal() {
             </div>
 
             <div className="flex items-center gap-2.5">
+              <button
+                onClick={() => {
+                  if (managerSession) fetchOrderHistory(managerSession.token, managerSession.restaurantId);
+                }}
+                className="flex items-center gap-1.5 bg-[#F1F5F9] hover:bg-[#E2E8F0] text-[#0B1B29] px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs"
+                title="Refresh Completed Orders from Server"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-[#64748B]" />
+                <span>Refresh Orders</span>
+              </button>
+
               <button
                 onClick={() => setCurrentView('pos')}
                 className="flex items-center gap-2 bg-[#D92F43] hover:bg-[#B82035] text-white px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm"
@@ -2390,6 +2526,10 @@ export default function ManagerOrderPortal() {
                         </span>
                         <span className="text-xs font-semibold text-[#16A34A] bg-[#DCFCE7] px-2 py-0.5 rounded-md">
                           KOT #{order.kotToken}
+                        </span>
+                        <span className="text-xs font-semibold text-[#16A34A] bg-[#DCFCE7] px-2 py-0.5 rounded-md flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3 text-[#16A34A]" />
+                          <span>ORDER DONE</span>
                         </span>
                       </div>
 
@@ -3586,12 +3726,12 @@ export default function ManagerOrderPortal() {
                       {ownerTemplate.headerText && (
                         <div className="text-[11px] text-[#64748B] italic">{ownerTemplate.headerText}</div>
                       )}
-                      <div className="text-[11px]">{managerSession.restaurantLocation}</div>
-                      <div className="text-[11px]">Ph: {managerSession.restaurantPhone || '080 4123 4567'}</div>
+                      {managerSession.restaurantLocation ? <div className="text-[11px]">{managerSession.restaurantLocation}</div> : null}
+                      {managerSession.restaurantPhone ? <div className="text-[11px]">Ph: {managerSession.restaurantPhone}</div> : null}
                       <div className="text-[10px] text-[#475569]">
-                        {ownerTemplate.showGst && `GSTIN: ${managerSession.gstNumber || '29AABCT1332L1Z4'}`}
-                        {ownerTemplate.showGst && ownerTemplate.showFssai && ' • '}
-                        {ownerTemplate.showFssai && `FSSAI: ${managerSession.fssai || '11223344556677'}`}
+                        {ownerTemplate.showGst && managerSession.gstNumber ? `GSTIN: ${managerSession.gstNumber}` : ''}
+                        {ownerTemplate.showGst && managerSession.gstNumber && ownerTemplate.showFssai && managerSession.fssai ? ' • ' : ''}
+                        {ownerTemplate.showFssai && managerSession.fssai ? `FSSAI: ${managerSession.fssai}` : ''}
                       </div>
                     </div>
 
@@ -3807,12 +3947,12 @@ export default function ManagerOrderPortal() {
             <div style={{ textAlign: 'center', marginBottom: '8px' }}>
               <div style={{ fontWeight: 'bold', fontSize: '16px' }}>{managerSession.restaurantName}</div>
               {ownerTemplate.headerText && <div style={{ fontSize: '11px', fontStyle: 'italic' }}>{ownerTemplate.headerText}</div>}
-              <div>{managerSession.restaurantLocation}</div>
-              <div>Ph: {managerSession.restaurantPhone || '080 4123 4567'}</div>
+              {managerSession.restaurantLocation ? <div>{managerSession.restaurantLocation}</div> : null}
+              {managerSession.restaurantPhone ? <div>Ph: {managerSession.restaurantPhone}</div> : null}
               <div>
-                {ownerTemplate.showGst && `GSTIN: ${managerSession.gstNumber || '29AABCT1332L1Z4'}`}
-                {ownerTemplate.showGst && ownerTemplate.showFssai && ' • '}
-                {ownerTemplate.showFssai && `FSSAI: ${managerSession.fssai || '11223344556677'}`}
+                {ownerTemplate.showGst && managerSession.gstNumber ? `GSTIN: ${managerSession.gstNumber}` : ''}
+                {ownerTemplate.showGst && managerSession.gstNumber && ownerTemplate.showFssai && managerSession.fssai ? ' • ' : ''}
+                {ownerTemplate.showFssai && managerSession.fssai ? `FSSAI: ${managerSession.fssai}` : ''}
               </div>
             </div>
             <div style={{ borderTop: '1px dashed #000', margin: '4px 0' }} />

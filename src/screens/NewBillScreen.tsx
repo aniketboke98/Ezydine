@@ -19,7 +19,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { MenuItem } from '../types';
-import { MOCK_MENU_ITEMS } from '../data/mockData';
 import { api, safeStorage } from '../services/api';
 
 const { width } = Dimensions.get('window');
@@ -28,7 +27,7 @@ const CARD_WIDTH = (width - 48) / 2;
 interface NewBillScreenProps {
   onBackToDashboard: () => void;
   onOpenOrders?: () => void;
-  onProceedToBillDetails?: () => void;
+  onProceedToBillDetails?: (orderData?: any) => void;
 }
 
 const DEFAULT_IMAGES = {
@@ -59,6 +58,7 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
   const [showTableModal, setShowTableModal] = useState(false);
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [orderCompleteModal, setOrderCompleteModal] = useState(false);
+  const [orderSeqNumber, setOrderSeqNumber] = useState<number>(1);
 
   // Quick Add Custom Dish Modal (e.g. typing "Paneer Tikka" or code)
   const [showQuickAddModal, setShowQuickAddModal] = useState(false);
@@ -106,11 +106,10 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
             }))
           );
         } else {
-          // If empty DB, use default templates
-          setMenuItems(MOCK_MENU_ITEMS);
+          setMenuItems([]);
         }
       } else {
-        setMenuItems(MOCK_MENU_ITEMS);
+        setMenuItems([]);
       }
 
       if (profileRes.status === 'fulfilled' && profileRes.value?.success) {
@@ -126,9 +125,24 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
           }
         }
       }
+
+      // Dynamic tables from PostgreSQL
+      try {
+        const tableRes = await api.tables.getAll();
+        if (tableRes.success && Array.isArray(tableRes.tables) && tableRes.tables.length > 0) {
+          setTables(tableRes.tables.map((t: any) => t.tableNumber || `Table ${t.id}`));
+        }
+      } catch {}
+
+      try {
+        const billsRes = await api.bills.getAll();
+        if (billsRes.success && Array.isArray(billsRes.bills)) {
+          setOrderSeqNumber(billsRes.bills.length + 1);
+        }
+      } catch {}
     } catch (e) {
       console.warn('Failed to fetch menu:', e);
-      setMenuItems(MOCK_MENU_ITEMS);
+      setMenuItems([]);
     } finally {
       setIsLoadingMenu(false);
     }
@@ -143,7 +157,9 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
     loadMenuAndRestaurant();
   }, []);
 
-  const tables = ['Table 01', 'Table 02', 'Table 03', 'Table 04', 'Table 05', 'VIP-1', 'Terrace-01', 'Takeaway #12', 'Delivery #04'];
+  const [tables, setTables] = useState<string[]>([
+    'Table 01', 'Table 02', 'Table 03', 'Table 04', 'Table 05', 'VIP-1', 'Terrace-01', 'Takeaway'
+  ]);
 
   // Handle Increments & Decrements (Minus Option)
   const handleIncrement = (id: string | number) => {
@@ -284,7 +300,7 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
             <View>
               <Text style={styles.headerTitle}>New bill</Text>
               <Text style={styles.headerSubtitle}>
-                #1048 · {restaurantName}
+                Order #{orderSeqNumber} · {restaurantName}
               </Text>
             </View>
           </View>
@@ -588,7 +604,25 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
             ]}
             onPress={() => {
               if (onProceedToBillDetails) {
-                onProceedToBillDetails();
+                const selectedItems = menuItems
+                  .filter((it) => (quantities[it.id] || 0) > 0)
+                  .map((it) => ({
+                    id: String(it.id),
+                    name: it.name,
+                    unitPrice: it.price,
+                    qty: quantities[it.id] || 1,
+                  }));
+                onProceedToBillDetails({
+                  billNumber: `Order #${orderSeqNumber}`,
+                  orderNumber: `Order #${orderSeqNumber}`,
+                  kotToken: orderSeqNumber,
+                  items: selectedItems,
+                  tableNumber: selectedTable,
+                  subtotal,
+                  discount: 0,
+                  gst: cgst + sgst,
+                  total: grandTotal,
+                });
               } else {
                 setShowCheckoutModal(true);
               }
@@ -803,7 +837,7 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
             <View style={styles.checkoutSheet}>
               <View style={styles.sheetHandle} />
               <View style={styles.sheetHeader}>
-                <Text style={styles.sheetTitle}>Review Bill #1048</Text>
+                <Text style={styles.sheetTitle}>Review Order #{orderSeqNumber}</Text>
                 <TouchableOpacity onPress={() => setShowCheckoutModal(false)}>
                   <Ionicons name="close" size={24} color={Colors.navy} />
                 </TouchableOpacity>
@@ -937,7 +971,7 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
               </View>
               <Text style={styles.successTitle}>Bill Settled Successfully!</Text>
               <Text style={styles.successSub}>
-                Bill #1048 for {selectedTable} has been printed and sent to KOT.
+                Order for {selectedTable} has been printed and sent to KOT.
               </Text>
 
               <TouchableOpacity

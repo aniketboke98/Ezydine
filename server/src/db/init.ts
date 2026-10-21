@@ -101,9 +101,9 @@ export async function initializeDatabase() {
         name VARCHAR(100) NOT NULL,
         location VARCHAR(200) NOT NULL,
         phone VARCHAR(50) NOT NULL,
-        gst_number VARCHAR(50) DEFAULT '29AABCT1332L1Z4',
+        gst_number VARCHAR(50),
         gst_rate NUMERIC(5,2) DEFAULT 5.0,
-        fssai VARCHAR(50) DEFAULT '11223344556677',
+        fssai VARCHAR(50),
         thermal_paper_width VARCHAR(10) DEFAULT '58mm',
         kot_enabled BOOLEAN DEFAULT true,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

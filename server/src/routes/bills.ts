@@ -121,8 +121,12 @@ router.post('/', requireAuth, requirePermission('CREATE_BILL'), async (req: Auth
       return res.status(400).json({ success: false, error: 'Bill items are required' });
     }
 
-    const billNumber = `#${Math.floor(1000 + Math.random() * 9000)}`;
-    const kotNumber = `KOT #${Math.floor(100 + Math.random() * 900)}`;
+    const count = await prisma.bill.count({
+      where: { restaurantId },
+    });
+    const orderNum = count + 1;
+    const billNumber = req.body.billNumber || `Order #${orderNum}`;
+    const kotNumber = req.body.kotNumber || `KOT #${orderNum}`;
 
     const newBill = await prisma.$transaction(async (tx) => {
       // 1. Create Bill
@@ -136,7 +140,8 @@ router.post('/', requireAuth, requirePermission('CREATE_BILL'), async (req: Auth
           discount: discount ? Number(discount) : 0,
           gstAmount: gstAmount ? Number(gstAmount) : 0,
           totalAmount: Number(totalAmount),
-          paymentStatus: 'unpaid',
+          paymentStatus: req.body.paymentStatus || 'paid',
+          paymentMethod: req.body.paymentMethod || 'UPI',
           items: {
             create: items.map((item: any) => ({
               name: item.name,
@@ -166,14 +171,15 @@ router.post('/', requireAuth, requirePermission('CREATE_BILL'), async (req: Auth
         },
       });
 
-      // 3. Mark Table as occupied if Dine-In
+      // 3. Update Table status
       if (tableNumber) {
+        const isPaid = (req.body.paymentStatus || 'paid') === 'paid';
         await tx.table.updateMany({
           where: { restaurantId, tableNumber },
           data: {
-            status: 'occupied',
-            activeAmount: Number(totalAmount),
-            activeTime: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            status: isPaid ? 'available' : 'occupied',
+            activeAmount: isPaid ? 0 : Number(totalAmount),
+            activeTime: isPaid ? null : new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
           },
         });
       }

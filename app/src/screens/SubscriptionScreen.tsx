@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
-import { SUBSCRIPTION_PLANS } from '../data/mockData';
 import { api } from '../services/api';
 
 interface SubscriptionScreenProps {
@@ -22,8 +21,8 @@ export const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
   onBack,
   onSelectPlan,
 }) => {
-  const [plans, setPlans] = useState(SUBSCRIPTION_PLANS);
-  const [loading, setLoading] = useState(false);
+  const [plans, setPlans] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     // Fetch live plans from backend PostgreSQL
@@ -43,7 +42,9 @@ export const SubscriptionScreen: React.FC<SubscriptionScreenProps> = ({
           setPlans(formatted);
         }
       } catch (err) {
-        // Fallback to updated mockData
+        // network issue
+      } finally {
+        setLoading(false);
       }
     };
     loadPlans();

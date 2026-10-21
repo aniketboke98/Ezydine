@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
-import { api } from '../services/api';
+import { api, safeStorage } from '../services/api';
 
 interface MySubscriptionScreenProps {
   onBack: () => void;
@@ -34,15 +34,21 @@ export const MySubscriptionScreen: React.FC<MySubscriptionScreenProps> = ({
           setSubData(res.subscription);
         }
       } catch (err) {
-        // Fallback default
-        setSubData({
-          plan_name: 'Standard Plan',
-          price: 2999,
-          device_limit: 3,
-          activeDeviceCount: 1,
-          daysRemaining: 30,
-          status: 'active',
-        });
+        // Check saved plan in local storage
+        const raw = await safeStorage.getItem('@ezydine_plan_data').catch(() => null);
+        if (raw) {
+          try {
+            const p = JSON.parse(raw);
+            setSubData({
+              plan_name: p.name || 'Active Plan',
+              price: p.price || 0,
+              device_limit: p.device_limit || p.deviceLimit || 1,
+              activeDeviceCount: 1,
+              daysRemaining: 30,
+              status: 'active',
+            });
+          } catch {}
+        }
       } finally {
         setLoading(false);
       }
@@ -50,11 +56,11 @@ export const MySubscriptionScreen: React.FC<MySubscriptionScreenProps> = ({
     fetchSub();
   }, []);
 
-  const planName = subData?.plan_name || 'Standard Plan';
-  const price = subData?.price || 2999;
-  const deviceLimit = subData?.device_limit || 3;
+  const planName = subData?.plan_name || 'Active Plan';
+  const price = subData?.price || 0;
+  const deviceLimit = subData?.device_limit || 1;
   const activeDevices = subData?.activeDeviceCount || 1;
-  const daysRemaining = subData?.daysRemaining ?? 30;
+  const daysRemaining = subData?.daysRemaining ?? 0;
   const devicePercent = Math.min(100, Math.round((activeDevices / deviceLimit) * 100));
 
   return (

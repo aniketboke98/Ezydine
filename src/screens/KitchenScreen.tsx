@@ -1,5 +1,5 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
+import { api } from '../services/api';
 
 interface KitchenScreenProps {
   onBack: () => void;
@@ -23,39 +24,32 @@ interface KOTTicket {
 }
 
 export const KitchenScreen: React.FC<KitchenScreenProps> = ({ onBack }) => {
-  const [tickets, setTickets] = useState<KOTTicket[]>([
-    {
-      id: 'KOT-1048',
-      table: 'Table 04',
-      time: 'Just now',
-      status: 'Preparing',
-      items: [
-        { name: 'Paneer Butter Masala', qty: 1, note: 'Medium spicy' },
-        { name: 'Garlic Naan', qty: 2, note: 'Crispy' },
-        { name: 'Sweet Lassi', qty: 2 },
-      ],
-    },
-    {
-      id: 'KOT-1047',
-      table: 'Table 02',
-      time: '6 mins ago',
-      status: 'Ready',
-      items: [
-        { name: 'Chicken Biryani', qty: 2 },
-        { name: 'Chicken Tikka', qty: 1 },
-      ],
-    },
-    {
-      id: 'KOT-1046',
-      table: 'Takeaway #12',
-      time: '14 mins ago',
-      status: 'Served',
-      items: [
-        { name: 'Dal Makhani', qty: 1 },
-        { name: 'Garlic Naan', qty: 4 },
-      ],
-    },
-  ]);
+  const [tickets, setTickets] = useState<KOTTicket[]>([]);
+
+  useEffect(() => {
+    api.kot.getAll().then((res) => {
+      if (res.success && Array.isArray(res.orders)) {
+        const loaded: KOTTicket[] = res.orders.map((o: any, idx: number) => {
+          let parsedItems: { name: string; qty: number; note?: string }[] = [];
+          if (Array.isArray(o.items)) {
+            parsedItems = o.items.map((it: any) => ({
+              name: it.name || 'Item',
+              qty: it.qty || it.quantity || 1,
+              note: it.note || '',
+            }));
+          }
+          return {
+            id: `KOT #${o.token || o.kotToken || idx + 1}`,
+            table: o.tableNumber || o.table || `Table 0${idx + 1}`,
+            time: o.time || 'Just now',
+            status: (o.status === 'Ready' || o.status === 'Served') ? o.status : 'Preparing',
+            items: parsedItems,
+          };
+        });
+        setTickets(loaded);
+      }
+    }).catch(() => null);
+  }, []);
 
   const toggleStatus = (id: string) => {
     setTickets((prev) =>

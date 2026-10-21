@@ -19,14 +19,17 @@ import { api } from '../services/api';
 interface ReceiptScreenProps {
   onBack: () => void;
   onNewBill: () => void;
+  orderData?: any;
 }
 
 export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
   onBack,
   onNewBill,
+  orderData,
 }) => {
   const [isBluetoothModalOpen, setIsBluetoothModalOpen] = useState(false);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
+  const [activeReceipt, setActiveReceipt] = useState<any>(orderData || null);
   const [restaurantProfile, setRestaurantProfile] = useState<any>({
     name: 'Restaurant',
     location: '',
@@ -34,6 +37,31 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
     gstNumber: '',
     fssai: '',
   });
+
+  useEffect(() => {
+    if (!orderData) {
+      api.bills.getAll().then((res) => {
+        if (res.success && Array.isArray(res.bills) && res.bills.length > 0) {
+          const b = res.bills[0];
+          setActiveReceipt({
+            billNumber: b.billNumber || '#1',
+            tableNumber: b.tableNumber || '01',
+            dateTime: `${b.date || ''} · ${b.time || ''}`,
+            items: (b.items || []).map((it: any) => ({
+              name: it.name,
+              qty: it.quantity,
+              unitPrice: it.price,
+            })),
+            subtotal: b.subtotal,
+            discount: b.discount,
+            gst: b.gstAmount,
+            grandTotal: b.totalAmount,
+            paymentMethod: b.paymentMethod,
+          });
+        }
+      }).catch(() => null);
+    }
+  }, [orderData]);
 
   useEffect(() => {
     api.getRestaurant().then((cached) => {
@@ -80,8 +108,11 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
 
   const handleShare = async () => {
     try {
+      const bNum = activeReceipt?.billNumber || 'Order #1';
+      const tbl = activeReceipt?.tableNumber || '01';
+      const tot = (activeReceipt?.grandTotal || activeReceipt?.totalAmount || 0).toFixed(2);
       await Share.share({
-        message: `${restaurantProfile.name || 'Restaurant'} - Bill #1048 for Table 04. Total: ₹630.00. Thank you for dining with us!`,
+        message: `${restaurantProfile.name || 'Restaurant'} - Bill ${bNum} for Table ${tbl}. Total: ₹${tot}. Thank you for dining with us!`,
       });
     } catch (e) {
       // Ignored
@@ -104,9 +135,10 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
       return;
     }
 
+    const bNum = activeReceipt?.billNumber || 'Order #1';
     Alert.alert(
       'Receipt Printed!',
-      `Receipt #1048 sent successfully to ${connectedPrinter.name} (${paperWidth} thermal paper).`,
+      `Receipt ${bNum} sent successfully to ${connectedPrinter.name} (${paperWidth} thermal paper).`,
       [{ text: 'OK' }]
     );
   };
@@ -130,7 +162,7 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
               </TouchableOpacity>
               <View>
                 <Text style={styles.title}>Receipt & Print</Text>
-                <Text style={styles.subtitle}>Bill #1048 · Table 04</Text>
+                <Text style={styles.subtitle}>{activeReceipt?.billNumber || 'Order #1'} · Table {activeReceipt?.tableNumber || '01'}</Text>
               </View>
             </View>
 
@@ -267,11 +299,13 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
             {/* Invoice Meta */}
             <View style={styles.metaRow}>
               <View>
-                <Text style={styles.metaLabel}>TAX INVOICE #1048</Text>
-                <Text style={styles.metaSub}>18 Oct 2026 · 02:41 PM</Text>
+                <Text style={styles.metaLabel}>TAX INVOICE {activeReceipt?.billNumber || '#1'}</Text>
+                <Text style={styles.metaSub}>
+                  {activeReceipt?.dateTime || new Date().toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}
+                </Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
-                <Text style={styles.metaLabel}>Table 04 · Dine-in</Text>
+                <Text style={styles.metaLabel}>Table {activeReceipt?.tableNumber || '01'} · {activeReceipt?.orderType || 'Dine-in'}</Text>
               </View>
             </View>
 
@@ -283,49 +317,65 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
               <Text style={styles.tableHeaderCol}>AMOUNT</Text>
             </View>
 
-            {/* Items */}
+            {/* Dynamic Items */}
             <View style={styles.itemsList}>
-              <View style={styles.itemRow}>
-                <Text style={styles.itemName}>Paneer Butter Masala × 1</Text>
-                <Text style={styles.itemPrice}>₹320.00</Text>
-              </View>
-              <View style={styles.itemRow}>
-                <Text style={styles.itemName}>Garlic Naan × 2</Text>
-                <Text style={styles.itemPrice}>₹120.00</Text>
-              </View>
-              <View style={styles.itemRow}>
-                <Text style={styles.itemName}>Sweet Lassi × 2</Text>
-                <Text style={styles.itemPrice}>₹200.00</Text>
-              </View>
+              {activeReceipt?.items && activeReceipt.items.length > 0 ? (
+                activeReceipt.items.map((it: any, idx: number) => {
+                  const qty = Number(it.qty || it.quantity || 1);
+                  const price = Number(it.unitPrice || it.price || 0);
+                  const itemTotal = qty * price;
+                  return (
+                    <View key={idx} style={styles.itemRow}>
+                      <Text style={styles.itemName}>
+                        {it.name} × {qty}
+                      </Text>
+                      <Text style={styles.itemPrice}>₹{itemTotal.toFixed(2)}</Text>
+                    </View>
+                  );
+                })
+              ) : (
+                <View style={styles.itemRow}>
+                  <Text style={styles.itemName}>Standard Service</Text>
+                  <Text style={styles.itemPrice}>₹0.00</Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.dashedDivider} />
 
-            {/* Financials */}
+            {/* Dynamic Financials */}
             <View style={styles.calcRow}>
               <Text style={styles.calcLabel}>Subtotal</Text>
-              <Text style={styles.calcVal}>₹640.00</Text>
+              <Text style={styles.calcVal}>₹{Number(activeReceipt?.subtotal || 0).toFixed(2)}</Text>
             </View>
 
-            <View style={styles.calcRow}>
-              <Text style={styles.calcLabel}>Special Discount</Text>
-              <Text style={styles.discountVal}>- ₹40.00</Text>
-            </View>
+            {Number(activeReceipt?.discount || 0) > 0 && (
+              <View style={styles.calcRow}>
+                <Text style={styles.calcLabel}>Special Discount</Text>
+                <Text style={styles.discountVal}>- ₹{Number(activeReceipt?.discount || 0).toFixed(2)}</Text>
+              </View>
+            )}
 
             <View style={styles.calcRow}>
               <Text style={styles.calcLabel}>Taxable Amount</Text>
-              <Text style={styles.calcVal}>₹600.00</Text>
+              <Text style={styles.calcVal}>
+                ₹{Math.max(0, Number(activeReceipt?.subtotal || 0) - Number(activeReceipt?.discount || 0)).toFixed(2)}
+              </Text>
             </View>
 
-            {receiptConfig.showGst && (
+            {receiptConfig.showGst && Number(activeReceipt?.gst || activeReceipt?.gstAmount || 0) > 0 && (
               <View style={styles.taxSplitBox}>
                 <View style={styles.calcRow}>
                   <Text style={styles.taxSub}>CGST (2.5% HSN 9963)</Text>
-                  <Text style={styles.taxSub}>₹15.00</Text>
+                  <Text style={styles.taxSub}>
+                    ₹{(Number(activeReceipt?.gst || activeReceipt?.gstAmount || 0) / 2).toFixed(2)}
+                  </Text>
                 </View>
                 <View style={styles.calcRow}>
                   <Text style={styles.taxSub}>SGST (2.5% HSN 9963)</Text>
-                  <Text style={styles.taxSub}>₹15.00</Text>
+                  <Text style={styles.taxSub}>
+                    ₹{(Number(activeReceipt?.gst || activeReceipt?.gstAmount || 0) / 2).toFixed(2)}
+                  </Text>
                 </View>
               </View>
             )}
@@ -336,13 +386,13 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
             <View style={styles.grandTotalRow}>
               <Text style={styles.grandTotalLabel}>Grand Total</Text>
               <Text style={styles.grandTotalVal}>
-                ₹{receiptConfig.showGst ? '630.00' : '600.00'}
+                ₹{Number(activeReceipt?.grandTotal || activeReceipt?.totalAmount || 0).toFixed(2)}
               </Text>
             </View>
 
             <View style={styles.cashTenderedRow}>
-              <Text style={styles.cashTenderedText}>Cash Tendered: ₹700.00</Text>
-              <Text style={styles.cashTenderedText}>Change: ₹{receiptConfig.showGst ? '70.00' : '100.00'}</Text>
+              <Text style={styles.cashTenderedText}>Payment Mode: {activeReceipt?.paymentMethod || 'UPI'}</Text>
+              <Text style={styles.cashTenderedText}>Status: Paid</Text>
             </View>
 
             <View style={styles.dashedDivider} />

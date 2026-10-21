@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
+import { api } from '../services/api';
 
 interface ReceiptSettingsModalProps {
   visible: boolean;
@@ -48,6 +49,22 @@ export const ReceiptSettingsModal: React.FC<ReceiptSettingsModalProps> = ({
   const [headerText, setHeaderText] = useState(initialConfig?.headerText || 'Authentic Flavors');
   const [footerText, setFooterText] = useState(initialConfig?.footerText || 'Thank you for dining with us! Visit again.');
   const [paperWidth, setPaperWidth] = useState<'58mm' | '80mm'>(initialConfig?.paperWidth || '58mm');
+  const [storeProfile, setStoreProfile] = useState<any>({ name: 'Restaurant', location: '', gstin: '', fssai: '' });
+
+  React.useEffect(() => {
+    if (visible) {
+      api.getRestaurant().then((cached) => {
+        if (cached) {
+          setStoreProfile({
+            name: cached.name || cached.restaurant_name || 'Restaurant',
+            location: cached.location || cached.address || '',
+            gstin: cached.gstNumber || cached.gst_number || '',
+            fssai: cached.fssai || '',
+          });
+        }
+      }).catch(() => null);
+    }
+  }, [visible]);
 
   React.useEffect(() => {
     if (visible && initialConfig) {
@@ -165,7 +182,7 @@ export const ReceiptSettingsModal: React.FC<ReceiptSettingsModalProps> = ({
             <View style={styles.settingRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.settingTitle}>Print GST Details</Text>
-                <Text style={styles.settingDesc}>Include GSTIN 29AABCT1332L1Z4 & tax breakdown</Text>
+                <Text style={styles.settingDesc}>Include GSTIN & tax breakdown</Text>
               </View>
               <Switch
                 value={showGst}
@@ -250,10 +267,10 @@ export const ReceiptSettingsModal: React.FC<ReceiptSettingsModalProps> = ({
               <Text style={styles.previewHeading}>Thermal Receipt Preview</Text>
               <View style={styles.previewSlip}>
                 {showLogo && <Text style={styles.previewLogo}>[ EzyDine Logo ]</Text>}
-                <Text style={styles.previewStoreName}>The Curry House</Text>
-                <Text style={styles.previewAddress}>Indiranagar, Bengaluru</Text>
-                {showFssai && <Text style={styles.previewMeta}>FSSAI: 11223344556677</Text>}
-                {showGst && <Text style={styles.previewMeta}>GSTIN: 29AABCT1332L1Z4</Text>}
+                <Text style={styles.previewStoreName}>{storeProfile.name || 'Restaurant'}</Text>
+                {Boolean(storeProfile.location) && <Text style={styles.previewAddress}>{storeProfile.location}</Text>}
+                {showFssai && Boolean(storeProfile.fssai) && <Text style={styles.previewMeta}>FSSAI: {storeProfile.fssai}</Text>}
+                {showGst && Boolean(storeProfile.gstin) && <Text style={styles.previewMeta}>GSTIN: {storeProfile.gstin}</Text>}
                 <Text style={styles.previewDivider}>--------------------------------</Text>
                 <Text style={styles.previewItem}>1x Paneer Butter Masala   280.00</Text>
                 <Text style={styles.previewItem}>2x Butter Naan             90.00</Text>

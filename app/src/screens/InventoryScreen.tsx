@@ -31,8 +31,8 @@ interface InventoryScreenProps {
 
 export const InventoryScreen: React.FC<InventoryScreenProps> = ({ onBack }) => {
   const [items, setItems] = useState<InventoryItem[]>([]);
-  const [totalValue, setTotalValue] = useState<number>(18420);
-  const [lowStockCount, setLowStockCount] = useState<number>(2);
+  const [totalValue, setTotalValue] = useState<number>(0);
+  const [lowStockCount, setLowStockCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   const fetchInventory = async () => {
@@ -41,7 +41,7 @@ export const InventoryScreen: React.FC<InventoryScreenProps> = ({ onBack }) => {
       if (res.success && res.items) {
         setItems(res.items);
         if (res.summary) {
-          setTotalValue(res.summary.totalStockValue || 18420);
+          setTotalValue(res.summary.totalStockValue || 0);
           setLowStockCount(res.summary.lowStockAlertsCount || 0);
         }
       }

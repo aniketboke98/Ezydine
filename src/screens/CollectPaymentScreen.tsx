@@ -12,26 +12,53 @@ import {
 } from 'react-native';
 import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
+import { api } from '../services/api';
 
 interface CollectPaymentScreenProps {
   onBack: () => void;
-  onPaymentComplete: () => void;
+  onPaymentComplete: (savedOrder?: any) => void;
   totalAmount?: number;
+  orderData?: any;
 }
 
 export const CollectPaymentScreen: React.FC<CollectPaymentScreenProps> = ({
   onBack,
   onPaymentComplete,
-  totalAmount = 630.0,
+  totalAmount = 0,
+  orderData,
 }) => {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'upi' | 'card' | 'split'>('cash');
-  const [amountReceived, setAmountReceived] = useState('700.00');
+  const [amountReceived, setAmountReceived] = useState(totalAmount ? totalAmount.toFixed(2) : '');
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [restaurantProfile, setRestaurantProfile] = useState<any>({ name: 'Restaurant' });
+
+  React.useEffect(() => {
+    api.getRestaurant().then((cached) => {
+      if (cached) setRestaurantProfile(cached);
+    }).catch(() => null);
+  }, []);
 
   const numericReceived = parseFloat(amountReceived) || 0;
   const changeToReturn = Math.max(0, numericReceived - totalAmount);
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
+    try {
+      const billPayload = {
+        tableNumber: orderData?.tableNumber || '01',
+        items: (orderData?.items || []).map((it: any) => ({
+          name: it.name,
+          price: it.unitPrice || it.price,
+          quantity: it.qty || it.quantity || 1,
+        })),
+        subtotal: orderData?.subtotal || totalAmount,
+        discount: orderData?.discount || 0,
+        gstAmount: orderData?.gst || 0,
+        totalAmount: totalAmount,
+        paymentStatus: 'paid',
+        paymentMethod: paymentMethod === 'cash' ? 'Cash' : paymentMethod === 'upi' ? 'UPI' : 'Card',
+      };
+      await api.bills.create(billPayload).catch(() => null);
+    } catch {}
     setShowReceiptModal(true);
   };
 
@@ -54,7 +81,7 @@ export const CollectPaymentScreen: React.FC<CollectPaymentScreenProps> = ({
               </TouchableOpacity>
               <View>
                 <Text style={styles.title}>Collect payment</Text>
-                <Text style={styles.subtitle}>#1048 · Table 04</Text>
+                <Text style={styles.subtitle}>{orderData?.tableNumber ? `${orderData.tableNumber} · Dine-in` : 'Dine-in'}</Text>
               </View>
             </View>
 
@@ -78,7 +105,7 @@ export const CollectPaymentScreen: React.FC<CollectPaymentScreenProps> = ({
               ₹{totalAmount.toFixed(2)}
             </Text>
             <Text style={styles.totalPayableSub}>
-              5 items · GST included
+              {orderData?.items?.length ? `${orderData.items.length} items · ` : ''}GST applicable
             </Text>
           </View>
 
@@ -229,7 +256,9 @@ export const CollectPaymentScreen: React.FC<CollectPaymentScreenProps> = ({
                   size={120}
                   color={Colors.navy}
                 />
-                <Text style={styles.upiVpaText}>curryhouse@okaxis</Text>
+                <Text style={styles.upiVpaText}>
+                  {restaurantProfile?.name ? `${restaurantProfile.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@upi` : 'merchant@upi'}
+                </Text>
                 <Text style={styles.upiHintText}>
                   Ask customer to scan with GPay, PhonePe or Paytm
                 </Text>
@@ -272,7 +301,7 @@ export const CollectPaymentScreen: React.FC<CollectPaymentScreenProps> = ({
                 Prefer UPI? Collect ₹{totalAmount.toFixed(2)}
               </Text>
               <Text style={styles.upiBannerSub}>
-                The Curry House · curryhouse@okaxis
+                {restaurantProfile.name || 'Restaurant'}
               </Text>
             </View>
           </TouchableOpacity>
@@ -323,7 +352,7 @@ export const CollectPaymentScreen: React.FC<CollectPaymentScreenProps> = ({
 
               <Text style={styles.receiptModalTitle}>Payment Completed!</Text>
               <Text style={styles.receiptModalSub}>
-                Bill #1048 for Table 04 has been settled. Change to return: ₹{changeToReturn.toFixed(2)}.
+                Order for {orderData?.tableNumber || 'Table'} has been settled. Change to return: ₹{changeToReturn.toFixed(2)}.
               </Text>
 
               <View style={styles.receiptActionsRow}>
@@ -339,10 +368,10 @@ export const CollectPaymentScreen: React.FC<CollectPaymentScreenProps> = ({
                   style={styles.doneBtn}
                   onPress={() => {
                     setShowReceiptModal(false);
-                    onPaymentComplete();
+                    onPaymentComplete({ ...orderData, totalAmount, paymentMethod });
                   }}
                 >
-                  <Text style={styles.doneBtnText}>Back to Dashboard</Text>
+                  <Text style={styles.doneBtnText}>View Receipt</Text>
                 </TouchableOpacity>
               </View>
             </View>

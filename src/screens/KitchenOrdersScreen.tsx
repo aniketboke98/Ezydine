@@ -67,38 +67,15 @@ export const KitchenOrdersScreen: React.FC<KitchenOrdersScreenProps> = ({
               table: o.tableNumber || 'T1',
               time: `${o.createdAt || 'Just now'} · ${o.timeElapsed || 'few mins ago'}`,
               status: formattedStatus,
-              items: itemsList.length > 0 ? itemsList : ['1 × Chef Special Item'],
+              items: itemsList,
             };
           });
           setOrders(mapped);
         } else {
-          setOrders([
-            {
-              id: 'KOT #108',
-              table: 'T1',
-              time: '2:38 pm · 4m ago',
-              status: 'Preparing',
-              items: ['1 × Paneer Butter Masala', '2 × Butter Naan'],
-            },
-            {
-              id: 'KOT #109',
-              table: 'T5',
-              time: '2:41 pm · 1m ago',
-              status: 'Pending',
-              items: ['1 × Chicken Biryani', '2 × Masala Chai'],
-            },
-          ]);
+          setOrders([]);
         }
       } catch (err) {
-        setOrders([
-          {
-            id: 'KOT #108',
-            table: 'T1',
-            time: '2:38 pm · 4m ago',
-            status: 'Preparing',
-            items: ['1 × Paneer Butter Masala', '2 × Butter Naan'],
-          },
-        ]);
+        setOrders([]);
       } finally {
         setLoading(false);
       }

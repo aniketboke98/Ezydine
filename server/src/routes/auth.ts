@@ -151,7 +151,7 @@ router.post('/verify-register', async (req: Request, res: Response) => {
           name: restaurantName.trim(),
           location: (location || 'Main Branch').trim(),
           phone: cleanPhone,
-          gstNumber: '29AABCT1332L1Z4',
+          gstNumber: null,
           gstRate: 5.0,
           thermalPaperWidth: '58mm',
           kotEnabled: true,

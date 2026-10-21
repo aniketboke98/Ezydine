@@ -35,7 +35,7 @@ export const GSTConfigurationModal: React.FC<GSTConfigurationModalProps> = ({
   onClose,
   onSave,
   initialRate = 5,
-  initialGstin = '29AABCT1332L1Z4',
+  initialGstin = '',
   initialEnabled = true,
 }) => {
   const [enabled, setEnabled] = useState(initialEnabled);
@@ -171,7 +171,7 @@ export const GSTConfigurationModal: React.FC<GSTConfigurationModalProps> = ({
                     style={styles.textInput}
                     value={gstin}
                     onChangeText={setGstin}
-                    placeholder="29AABCT1332L1Z4"
+                    placeholder="Enter GSTIN (15 characters)"
                     placeholderTextColor={Colors.secondaryText}
                     autoCapitalize="characters"
                   />

@@ -6,7 +6,7 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-    KeyboardAvoidingView,
+  KeyboardAvoidingView,
   Platform,
   TouchableWithoutFeedback,
   Keyboard,
@@ -19,8 +19,16 @@ import { Colors } from '../theme/colors';
 import { EzyDineLogo } from '../components/EzyDineLogo';
 import { api } from '../services/api';
 
+export interface RegistrationPayload {
+  fullName: string;
+  phone: string;
+  email?: string;
+  restaurantName: string;
+  location?: string;
+}
+
 interface SignInScreenProps {
-  onProceedToOtp: (identifier: string, demoOtp?: string) => void;
+  onProceedToOtp: (identifier: string, demoOtp?: string, registrationData?: RegistrationPayload) => void;
   onBackToSplash?: () => void;
 }
 
@@ -28,12 +36,22 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
   onProceedToOtp,
   onBackToSplash,
 }) => {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  
+  // Login state
   const [identifier, setIdentifier] = useState('');
-  const [focused, setFocused] = useState(false);
+  
+  // Register state
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [restaurantName, setRestaurantName] = useState('');
+  const [location, setLocation] = useState('');
+
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  const handleSendOtp = async () => {
+  const handleSendLoginOtp = async () => {
     Keyboard.dismiss();
     if (!identifier || identifier.trim().length < 5) {
       setErrorMsg('Please enter a valid mobile number or email');
@@ -48,10 +66,47 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
       if (response && response.success) {
         onProceedToOtp(identifier.trim(), response.otp);
       } else {
-        setErrorMsg(response?.error || 'This mobile number is not registered. Please contact Master Admin.');
+        setErrorMsg(response?.error || 'Account not registered.');
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'This mobile number is not registered. Please contact Master Admin to create your account.');
+      setErrorMsg(err.message || 'No registered account found with this number.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRegister = async () => {
+    Keyboard.dismiss();
+    if (!fullName.trim() || !phone.trim() || !restaurantName.trim()) {
+      setErrorMsg('Full Name, Mobile Number, and Restaurant Name are required.');
+      return;
+    }
+
+    if (phone.trim().length < 10) {
+      setErrorMsg('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+
+    setErrorMsg('');
+    setLoading(true);
+
+    const payload: RegistrationPayload = {
+      fullName: fullName.trim(),
+      phone: phone.trim(),
+      email: email.trim() || undefined,
+      restaurantName: restaurantName.trim(),
+      location: location.trim() || 'Main Branch',
+    };
+
+    try {
+      const response = await api.auth.register(payload);
+      if (response && response.success) {
+        onProceedToOtp(phone.trim(), response.otp, payload);
+      } else {
+        setErrorMsg(response?.error || 'Registration failed. Please try again.');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Registration failed.');
     } finally {
       setLoading(false);
     }
@@ -83,63 +138,178 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
               <EzyDineLogo width={165} />
             </View>
 
+            {/* Mode Switcher: Sign In vs Register */}
+            <View style={styles.modeTabs}>
+              <TouchableOpacity
+                style={[styles.modeTab, mode === 'login' && styles.modeTabActive]}
+                onPress={() => {
+                  setMode('login');
+                  setErrorMsg('');
+                }}
+              >
+                <Text style={[styles.modeTabText, mode === 'login' && styles.modeTabTextActive]}>
+                  Sign In
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modeTab, mode === 'register' && styles.modeTabActive]}
+                onPress={() => {
+                  setMode('register');
+                  setErrorMsg('');
+                }}
+              >
+                <Text style={[styles.modeTabText, mode === 'register' && styles.modeTabTextActive]}>
+                  Register Restaurant
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             {/* Title & Subtitle */}
             <View style={styles.heroSection}>
               <View style={styles.badgeTwoStep}>
                 <Ionicons name="shield-checkmark" size={14} color={Colors.primaryRed} />
-                <Text style={styles.badgeTwoStepText}>2-STEP AUTHENTICATION</Text>
+                <Text style={styles.badgeTwoStepText}>
+                  {mode === 'login' ? '2-STEP AUTHENTICATION' : 'INSTANT ONBOARDING'}
+                </Text>
               </View>
-              <Text style={styles.heroTitle}>A fresh start.</Text>
-              <Text style={styles.heroTitle}>A smoother service.</Text>
+              <Text style={styles.heroTitle}>
+                {mode === 'login' ? 'Welcome Back.' : 'Launch Your POS.'}
+              </Text>
               <Text style={styles.heroSubtitle}>
-                Enter your registered mobile or email to receive your secure 6-digit OTP code.
+                {mode === 'login'
+                  ? 'Enter your registered mobile number to receive a secure OTP code.'
+                  : 'Set up your restaurant account and manage orders in minutes.'}
               </Text>
             </View>
 
             {/* Form */}
             <View style={styles.form}>
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Mobile number or email</Text>
-                <View
-                  style={[
-                    styles.inputContainer,
-                    focused && styles.inputContainerFocused,
-                  ]}
-                >
-                  <Ionicons
-                    name="call-outline"
-                    size={20}
-                    color={Colors.secondaryText}
-                    style={{ marginRight: 10 }}
-                  />
-                  <TextInput
-                    style={styles.input}
-                    value={identifier}
-                    onChangeText={(val) => {
-                      setIdentifier(val);
-                      if (errorMsg) setErrorMsg('');
-                    }}
-                    placeholder="Enter 10-digit mobile or email"
-                    placeholderTextColor={Colors.secondaryText}
-                    autoCapitalize="none"
-                    keyboardType="email-address"
-                    onFocus={() => setFocused(true)}
-                    onBlur={() => setFocused(false)}
-                  />
+              {mode === 'login' ? (
+                // LOGIN FIELDS
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Registered Mobile or Email</Text>
+                  <View style={styles.inputContainer}>
+                    <Ionicons
+                      name="call-outline"
+                      size={20}
+                      color={Colors.secondaryText}
+                      style={{ marginRight: 10 }}
+                    />
+                    <TextInput
+                      style={styles.input}
+                      value={identifier}
+                      onChangeText={(val) => {
+                        setIdentifier(val);
+                        if (errorMsg) setErrorMsg('');
+                      }}
+                      placeholder="e.g. 9876543210"
+                      placeholderTextColor={Colors.secondaryText}
+                      autoCapitalize="none"
+                      keyboardType="phone-pad"
+                    />
+                  </View>
                 </View>
-              </View>
+              ) : (
+                // REGISTRATION FIELDS
+                <>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Your Full Name *</Text>
+                    <View style={styles.inputContainer}>
+                      <Ionicons name="person-outline" size={20} color={Colors.secondaryText} style={{ marginRight: 10 }} />
+                      <TextInput
+                        style={styles.input}
+                        value={fullName}
+                        onChangeText={setFullName}
+                        placeholder="e.g. Rahul Sharma"
+                        placeholderTextColor={Colors.secondaryText}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Mobile Number *</Text>
+                    <View style={styles.inputContainer}>
+                      <Ionicons name="call-outline" size={20} color={Colors.secondaryText} style={{ marginRight: 10 }} />
+                      <TextInput
+                        style={styles.input}
+                        value={phone}
+                        onChangeText={setPhone}
+                        placeholder="10-digit mobile number"
+                        placeholderTextColor={Colors.secondaryText}
+                        keyboardType="phone-pad"
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Restaurant / Café Name *</Text>
+                    <View style={styles.inputContainer}>
+                      <Ionicons name="restaurant-outline" size={20} color={Colors.secondaryText} style={{ marginRight: 10 }} />
+                      <TextInput
+                        style={styles.input}
+                        value={restaurantName}
+                        onChangeText={setRestaurantName}
+                        placeholder="e.g. The Grand Bistro"
+                        placeholderTextColor={Colors.secondaryText}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Location / Branch (Optional)</Text>
+                    <View style={styles.inputContainer}>
+                      <Ionicons name="location-outline" size={20} color={Colors.secondaryText} style={{ marginRight: 10 }} />
+                      <TextInput
+                        style={styles.input}
+                        value={location}
+                        onChangeText={setLocation}
+                        placeholder="e.g. Indiranagar, Bengaluru"
+                        placeholderTextColor={Colors.secondaryText}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Email Address (Optional)</Text>
+                    <View style={styles.inputContainer}>
+                      <Ionicons name="mail-outline" size={20} color={Colors.secondaryText} style={{ marginRight: 10 }} />
+                      <TextInput
+                        style={styles.input}
+                        value={email}
+                        onChangeText={setEmail}
+                        placeholder="e.g. owner@bistro.in"
+                        placeholderTextColor={Colors.secondaryText}
+                        autoCapitalize="none"
+                        keyboardType="email-address"
+                      />
+                    </View>
+                  </View>
+                </>
+              )}
 
               {errorMsg ? (
                 <View style={styles.errorBox}>
                   <Ionicons name="alert-circle" size={16} color={Colors.primaryRed} />
                   <Text style={styles.errorText}>{errorMsg}</Text>
+                  {mode === 'login' && errorMsg.includes('not registered') && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setMode('register');
+                        if (identifier.match(/^\d+$/)) setPhone(identifier);
+                        setErrorMsg('');
+                      }}
+                      style={styles.switchModeInline}
+                    >
+                      <Text style={styles.switchModeInlineText}>Click here to Register →</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               ) : null}
 
-              {/* Continue to OTP Button */}
+              {/* Submit Button */}
               <TouchableOpacity
                 style={[styles.signInBtn, loading && styles.signInBtnDisabled]}
-                onPress={handleSendOtp}
+                onPress={mode === 'login' ? handleSendLoginOtp : handleRegister}
                 disabled={loading}
                 activeOpacity={0.85}
               >
@@ -153,7 +323,9 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
                       color="#FFFFFF"
                       style={{ marginRight: 8 }}
                     />
-                    <Text style={styles.signInBtnText}>Send Verification Code</Text>
+                    <Text style={styles.signInBtnText}>
+                      {mode === 'login' ? 'Send Verification Code' : 'Register & Send OTP'}
+                    </Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -168,17 +340,17 @@ export const SignInScreen: React.FC<SignInScreenProps> = ({
                 style={{ marginRight: 6 }}
               />
               <Text style={styles.securityText}>
-                Protected by end-to-end encryption & device limit authorization
+                Protected by PostgreSQL encryption & multi-tenant isolation
               </Text>
             </View>
 
             {/* Footer Support */}
             <View style={styles.footer}>
               <Text style={styles.footerSupportText}>
-                Need a hand?{' '}
+                Need assistance?{' '}
                 <Text
                   style={styles.contactSupportText}
-                  onPress={() => Alert.alert('Support', '24/7 Support line: +91 800-EZY-DINE')}
+                  onPress={() => Alert.alert('Support', '24/7 EzyDine Support line: +91 800-EZY-DINE')}
                 >
                   Contact support
                 </Text>
@@ -203,38 +375,64 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 16,
     paddingBottom: 32,
-    flexGrow: 1,
-    justifyContent: 'space-between',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 28,
-    gap: 14,
+    marginBottom: 20,
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: Colors.border,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F1F4F8',
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 12,
+  },
+  modeTabs: {
+    flexDirection: 'row',
+    backgroundColor: '#F0F3F7',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 20,
+  },
+  modeTab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+  modeTabActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  modeTabText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.secondaryText,
+  },
+  modeTabTextActive: {
+    color: Colors.navy,
+    fontWeight: '700',
   },
   heroSection: {
-    marginBottom: 28,
+    marginBottom: 24,
   },
   badgeTwoStep: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FEE2E2',
+    backgroundColor: '#FFEFEF',
+    alignSelf: 'flex-start',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 8,
-    alignSelf: 'flex-start',
-    gap: 6,
     marginBottom: 12,
+    gap: 6,
   },
   badgeTwoStepText: {
     fontSize: 11,
@@ -243,43 +441,38 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   heroTitle: {
-    fontSize: 32,
-    fontWeight: '700',
+    fontSize: 26,
+    fontWeight: '800',
     color: Colors.navy,
-    letterSpacing: -0.8,
-    lineHeight: 38,
+    letterSpacing: -0.5,
+    lineHeight: 32,
   },
   heroSubtitle: {
-    fontSize: 15,
+    fontSize: 14,
     color: Colors.secondaryText,
-    marginTop: 12,
-    lineHeight: 22,
+    marginTop: 8,
+    lineHeight: 20,
   },
   form: {
-    marginBottom: 24,
+    gap: 14,
   },
   inputGroup: {
-    marginBottom: 16,
+    gap: 6,
   },
   inputLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
     color: Colors.navy,
-    marginBottom: 8,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    height: 54,
-  },
-  inputContainerFocused: {
-    borderColor: Colors.primaryRed,
-    backgroundColor: '#FFFDFD',
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    height: 50,
   },
   input: {
     flex: 1,
@@ -287,76 +480,66 @@ const styles = StyleSheet.create({
     color: Colors.navy,
   },
   errorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'column',
+    backgroundColor: '#FFF5F5',
+    borderWidth: 1,
+    borderColor: '#FED7D7',
+    borderRadius: 10,
+    padding: 12,
     gap: 6,
-    marginBottom: 12,
   },
   errorText: {
-    fontSize: 13,
     color: Colors.primaryRed,
+    fontSize: 13,
     fontWeight: '500',
   },
-  presetRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 20,
+  switchModeInline: {
+    marginTop: 4,
   },
-  presetLabel: {
-    fontSize: 12,
-    color: Colors.secondaryText,
-    fontWeight: '500',
-  },
-  presetChip: {
-    backgroundColor: '#F1F5F9',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  presetChipText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.navy,
+  switchModeInlineText: {
+    color: Colors.primaryRed,
+    fontWeight: '700',
+    fontSize: 13,
+    textDecorationLine: 'underline',
   },
   signInBtn: {
-    backgroundColor: Colors.primaryRed,
-    borderRadius: 14,
-    height: 54,
     flexDirection: 'row',
-    alignItems: 'center',
+    backgroundColor: Colors.primaryRed,
+    height: 52,
+    borderRadius: 14,
     justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 8,
     shadowColor: Colors.primaryRed,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 4,
   },
   signInBtnDisabled: {
-    opacity: 0.6,
+    opacity: 0.7,
   },
   signInBtnText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '600',
-    letterSpacing: -0.2,
+    fontWeight: '700',
   },
   securityRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 10,
-    marginBottom: 20,
+    marginTop: 24,
+    paddingHorizontal: 12,
   },
   securityText: {
-    fontSize: 12,
+    fontSize: 11,
     color: Colors.secondaryText,
+    textAlign: 'center',
+    lineHeight: 16,
   },
   footer: {
+    marginTop: 24,
     alignItems: 'center',
-    paddingTop: 10,
   },
   footerSupportText: {
     fontSize: 13,

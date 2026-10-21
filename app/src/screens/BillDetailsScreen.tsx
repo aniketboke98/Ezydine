@@ -21,21 +21,18 @@ interface OrderItem {
 interface BillDetailsScreenProps {
   onBack: () => void;
   onAddItems: () => void;
-  onProceedToPayment: (total: number) => void;
+  onProceedToPayment: (total: number, orderData?: any) => void;
+  orderData?: any;
 }
 
 export const BillDetailsScreen: React.FC<BillDetailsScreenProps> = ({
   onBack,
   onAddItems,
   onProceedToPayment,
+  orderData,
 }) => {
-  const [items, setItems] = useState<OrderItem[]>([
-    { id: '1', name: 'Paneer Butter Masala', unitPrice: 320, qty: 1 },
-    { id: '2', name: 'Garlic Naan', unitPrice: 60, qty: 2 },
-    { id: '3', name: 'Sweet Lassi', unitPrice: 100, qty: 2 },
-  ]);
-
-  const [discountAmount, setDiscountAmount] = useState(40);
+  const [items, setItems] = useState<OrderItem[]>(orderData?.items || []);
+  const [discountAmount, setDiscountAmount] = useState(orderData?.discount || 0);
 
   const updateQty = (id: string, delta: number) => {
     setItems((prev) =>
@@ -80,7 +77,9 @@ export const BillDetailsScreen: React.FC<BillDetailsScreenProps> = ({
               </TouchableOpacity>
               <View>
                 <Text style={styles.title}>Bill details</Text>
-                <Text style={styles.subtitle}>#1048 · Table 04 · Dine-in</Text>
+                <Text style={styles.subtitle}>
+                  {orderData?.tableNumber ? `${orderData.tableNumber} · Dine-in` : 'Dine-in'}
+                </Text>
               </View>
             </View>
 
@@ -216,7 +215,16 @@ export const BillDetailsScreen: React.FC<BillDetailsScreenProps> = ({
         <View style={styles.bottomBar}>
           <TouchableOpacity
             style={styles.proceedBtn}
-            onPress={() => onProceedToPayment(totalPayable)}
+            onPress={() =>
+              onProceedToPayment(totalPayable, {
+                ...orderData,
+                items,
+                subtotal,
+                discount: discountAmount,
+                gst,
+                total: totalPayable,
+              })
+            }
             activeOpacity={0.85}
           >
             <Ionicons

@@ -37,7 +37,8 @@ import { api } from './src/services/api';
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('splash');
   const [showDemoSelector, setShowDemoSelector] = useState(false);
-  const [activeBillTotal, setActiveBillTotal] = useState(630.0);
+  const [activeBillTotal, setActiveBillTotal] = useState(0);
+  const [activeOrderData, setActiveOrderData] = useState<any>(null);
   const [authIdentifier, setAuthIdentifier] = useState('');
   const [authDemoOtp, setAuthDemoOtp] = useState('');
   const [authRegData, setAuthRegData] = useState<any>(null);
@@ -148,16 +149,24 @@ export default function App() {
             <NewBillScreen
               onBackToDashboard={() => setCurrentScreen('dashboard')}
               onOpenOrders={() => setCurrentScreen('kitchen')}
-              onProceedToBillDetails={() => setCurrentScreen('bill_details')}
+              onProceedToBillDetails={(order) => {
+                if (order) {
+                  setActiveOrderData(order);
+                  if (order.total) setActiveBillTotal(order.total);
+                }
+                setCurrentScreen('bill_details');
+              }}
             />
           )}
 
           {currentScreen === 'bill_details' && (
             <BillDetailsScreen
+              orderData={activeOrderData}
               onBack={() => setCurrentScreen('new_bill')}
               onAddItems={() => setCurrentScreen('new_bill')}
-              onProceedToPayment={(total) => {
+              onProceedToPayment={(total, orderPayload) => {
                 setActiveBillTotal(total);
+                if (orderPayload) setActiveOrderData(orderPayload);
                 setCurrentScreen('collect_payment');
               }}
             />
@@ -166,15 +175,23 @@ export default function App() {
           {currentScreen === 'collect_payment' && (
             <CollectPaymentScreen
               totalAmount={activeBillTotal}
+              orderData={activeOrderData}
               onBack={() => setCurrentScreen('bill_details')}
-              onPaymentComplete={() => setCurrentScreen('receipt')}
+              onPaymentComplete={(savedBill) => {
+                if (savedBill) setActiveOrderData(savedBill);
+                setCurrentScreen('receipt');
+              }}
             />
           )}
 
           {currentScreen === 'receipt' && (
             <ReceiptScreen
+              orderData={activeOrderData}
               onBack={() => setCurrentScreen('dashboard')}
-              onNewBill={() => setCurrentScreen('new_bill')}
+              onNewBill={() => {
+                setActiveOrderData(null);
+                setCurrentScreen('new_bill');
+              }}
             />
           )}
 
