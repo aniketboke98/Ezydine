@@ -107,19 +107,39 @@ int main(int argc, char *argv[]) {
                 }
             }
             
-            char readBuf[64] = {0};
-            UInt32 readSize = sizeof(readBuf);
-            kr = (*intf)->ReadPipe(intf, 1, readBuf, &readSize);
-            printf("ReadPipe from pipe 1 result: 0x%08x, bytesRead: %d\n", kr, readSize);
-            
-            char data[] = "\x1b\x40\x1b\x61\x01\x1d\x21\x11" "EZYDINE POS\x1d\x21\x00\n--------------------------------\nDirect USB Print: OK!\nTime: Now\n--------------------------------\n\n\n\n\x1d\x56\x00";
-            kr = (*intf)->WritePipe(intf, 2, data, strlen(data));
-            printf("WritePipe to pipe 2 result: 0x%08x\n", kr);
+            int success = 0;
+            if (argc > 1) {
+                FILE *f = fopen(argv[1], "rb");
+                if (f) {
+                    fseek(f, 0, SEEK_END);
+                    long sz = ftell(f);
+                    fseek(f, 0, SEEK_SET);
+                    char *buf = malloc(sz);
+                    fread(buf, 1, sz, f);
+                    fclose(f);
+                    kr = (*intf)->WritePipe(intf, 2, buf, sz);
+                    free(buf);
+                    printf("WritePipe file %s (%ld bytes): 0x%08x\n", argv[1], sz, kr);
+                    if (kr == KERN_SUCCESS) success = 1;
+                }
+            } else {
+                char data[] = "\x1b\x40\x1b\x61\x01\x1d\x21\x11" "EZYDINE POS\x1d\x21\x00\n--------------------------------\nDirect USB Print: OK!\nTime: Now\n--------------------------------\n\n\n\n\x1d\x56\x00";
+                kr = (*intf)->WritePipe(intf, 2, data, strlen(data));
+                printf("WritePipe test string: 0x%08x\n", kr);
+                if (kr == KERN_SUCCESS) success = 1;
+            }
             
             (*intf)->USBInterfaceClose(intf);
             (*intf)->Release(intf);
             IOObjectRelease(interfaceService);
-            break;
+            IOObjectRelease(iter);
+            if (success) {
+                printf("PRINT_SUCCESS\n");
+                return 0;
+            } else {
+                printf("PRINT_FAILED (0x%08x)\n", kr);
+                return 1;
+            }
         }
         IOObjectRelease(interfaceService);
     }

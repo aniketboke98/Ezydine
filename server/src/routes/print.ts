@@ -457,28 +457,43 @@ router.post('/', async (req: Request, res: Response) => {
     let printedVia = '';
     let dispatchOutput = '';
 
-    // Strategy 1: On macOS, check if direct USB connection exists for hardware thermal printing
-    let directUsbUri = '';
-    for (const u of usbPrinters) {
-      const uLower = u.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const tLower = targetPrinter.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (uLower.includes(tLower) || tLower.includes(uLower) || (u.isThermal && tLower.includes('pos'))) {
-        directUsbUri = u.uri;
-        break;
+    // Strategy 1: On macOS, dispatch via native IOKit direct USB tool (talks directly to hardware)
+    const nativeUsbBin = path.join(__dirname, '../utils/usb_print');
+    if (fs.existsSync(nativeUsbBin)) {
+      try {
+        dispatchOutput = await runCmd(`"${nativeUsbBin}" "${tmpFilePath}"`);
+        if (dispatchOutput.includes('PRINT_SUCCESS')) {
+          printedVia = 'native_iokit_usb (KPrinte)';
+        }
+      } catch (err: any) {
+        console.warn('Native IOKit print attempt, falling back to CUPS:', err.message);
       }
     }
-    if (!directUsbUri && usbPrinters.length > 0 && usbPrinters[0].isThermal) {
-      directUsbUri = usbPrinters[0].uri;
-    }
 
-    if (directUsbUri && fs.existsSync('/usr/libexec/cups/backend/usb')) {
-      try {
-        console.log(`[Print Service] Dispatching directly via macOS USB backend: ${directUsbUri}`);
-        const cmd = `DEVICE_URI="${directUsbUri}" /usr/libexec/cups/backend/usb 1 ezydine "POS Receipt" 1 "" "${tmpFilePath}"`;
-        dispatchOutput = await runCmd(cmd);
-        printedVia = `direct_usb (${directUsbUri})`;
-      } catch (usbErr: any) {
-        console.warn('Direct USB backend dispatch failed, falling back to CUPS lp:', usbErr.message);
+    // Strategy 2: If native tool wasn't used, check CUPS direct USB backend
+    if (!printedVia) {
+      let directUsbUri = '';
+      for (const u of usbPrinters) {
+        const uLower = u.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const tLower = targetPrinter.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (uLower.includes(tLower) || tLower.includes(uLower) || (u.isThermal && tLower.includes('pos'))) {
+          directUsbUri = u.uri;
+          break;
+        }
+      }
+      if (!directUsbUri && usbPrinters.length > 0 && usbPrinters[0].isThermal) {
+        directUsbUri = usbPrinters[0].uri;
+      }
+
+      if (directUsbUri && fs.existsSync('/usr/libexec/cups/backend/usb')) {
+        try {
+          console.log(`[Print Service] Dispatching directly via macOS USB backend: ${directUsbUri}`);
+          const cmd = `DEVICE_URI="${directUsbUri}" /usr/libexec/cups/backend/usb 1 ezydine "POS Receipt" 1 "" "${tmpFilePath}"`;
+          dispatchOutput = await runCmd(cmd);
+          printedVia = `direct_usb (${directUsbUri})`;
+        } catch (usbErr: any) {
+          console.warn('Direct USB backend dispatch failed, falling back to CUPS lp:', usbErr.message);
+        }
       }
     }
 
