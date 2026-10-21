@@ -13,6 +13,83 @@ export const RESTAURANT_INFO = {
 };
 
 export const MOCK_MENU_ITEMS: MenuItem[] = [
+  // South Indian
+  {
+    id: 101,
+    name: 'Masala Dosa',
+    category: 'South Indian',
+    price: 120,
+    isVeg: true,
+    isAvailable: true,
+    description: 'Crispy rice crepe filled with spiced potato masala and served with coconut chutney & sambar',
+  },
+  {
+    id: 102,
+    name: 'Idli Vada Combo',
+    category: 'South Indian',
+    price: 90,
+    isVeg: true,
+    isAvailable: true,
+    description: '2 steamed idlis and 1 crispy medu vada with hot sambar and coconut chutney',
+  },
+  {
+    id: 103,
+    name: 'Mysore Masala Dosa',
+    category: 'South Indian',
+    price: 140,
+    isVeg: true,
+    isAvailable: true,
+    description: 'Crispy dosa smeared with fiery red garlic chutney & stuffed with potato bhaji',
+  },
+  {
+    id: 104,
+    name: 'Filter Kaapi',
+    category: 'South Indian',
+    price: 50,
+    isVeg: true,
+    isAvailable: true,
+    description: 'Traditional aromatic frothy South Indian chicory filter coffee',
+  },
+
+  // Snacks
+  {
+    id: 201,
+    name: 'Samosa (2 pcs)',
+    category: 'Snacks',
+    price: 60,
+    isVeg: true,
+    isAvailable: true,
+    description: 'Flaky golden pastry stuffed with spiced potato and peas served with mint chutney',
+  },
+  {
+    id: 202,
+    name: 'Paneer Pakoda',
+    category: 'Snacks',
+    price: 140,
+    isVeg: true,
+    isAvailable: true,
+    description: 'Crispy gram-flour battered fresh cottage cheese fritters',
+  },
+  {
+    id: 203,
+    name: 'Pav Bhaji Special',
+    category: 'Snacks',
+    price: 160,
+    isVeg: true,
+    isAvailable: true,
+    description: 'Spiced mashed potato-tomato curry topped with butter, served with 2 toasted pav',
+  },
+  {
+    id: 204,
+    name: 'Vada Pav (2 pcs)',
+    category: 'Snacks',
+    price: 70,
+    isVeg: true,
+    isAvailable: true,
+    description: 'Iconic Mumbai potato vada inside pav with red garlic chutney',
+  },
+
+  // Mains & Breads
   {
     id: 1,
     name: 'Paneer Butter Masala',

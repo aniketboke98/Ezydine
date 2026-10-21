@@ -272,7 +272,6 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 <Text style={styles.metaLabel}>Table 04 · Dine-in</Text>
-                <Text style={styles.metaSub}>Cashier: Arjun (POS-1)</Text>
               </View>
             </View>
 
@@ -336,12 +335,14 @@ export const ReceiptScreen: React.FC<ReceiptScreenProps> = ({
             {/* Grand Total */}
             <View style={styles.grandTotalRow}>
               <Text style={styles.grandTotalLabel}>Grand Total</Text>
-              <Text style={styles.grandTotalVal}>₹630.00</Text>
+              <Text style={styles.grandTotalVal}>
+                ₹{receiptConfig.showGst ? '630.00' : '600.00'}
+              </Text>
             </View>
 
             <View style={styles.cashTenderedRow}>
               <Text style={styles.cashTenderedText}>Cash Tendered: ₹700.00</Text>
-              <Text style={styles.cashTenderedText}>Change: ₹70.00</Text>
+              <Text style={styles.cashTenderedText}>Change: ₹{receiptConfig.showGst ? '70.00' : '100.00'}</Text>
             </View>
 
             <View style={styles.dashedDivider} />

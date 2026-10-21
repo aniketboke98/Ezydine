@@ -227,7 +227,7 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
 
   // Dynamic Categories from items
   const dynamicCats = Array.from(new Set(menuItems.map((i) => i.category))).filter(Boolean);
-  const categories = ['All items', ...Array.from(new Set(['Starters', 'Mains', 'Breads', 'Drinks', ...dynamicCats]))];
+  const categories = ['All items', ...Array.from(new Set(['South Indian', 'Snacks', 'Starters', 'Mains', 'Breads', 'Drinks', ...dynamicCats]))];
 
   // Filter items by category, dish name, or dish code / number
   const trimmedSearch = searchQuery.trim().toLowerCase();
@@ -574,7 +574,7 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
         <View style={styles.bottomBar}>
           <View style={styles.totalWrap}>
             <Text style={styles.totalCountLabel}>
-              {totalItemsCount} items · incl. GST
+              {totalItemsCount} items{gstEnabled && activeGstRate > 0 ? ' · incl. GST' : ''}
             </Text>
             <Text style={styles.totalAmount}>
               ₹{grandTotal.toFixed(2)}
@@ -876,14 +876,14 @@ export const NewBillScreen: React.FC<NewBillScreenProps> = ({
                   <Text style={styles.summaryLabel}>Subtotal</Text>
                   <Text style={styles.summaryVal}>₹{subtotal.toFixed(2)}</Text>
                 </View>
-                <View style={styles.summaryLine}>
-                  <Text style={styles.summaryLabel}>
-                    {activeGstRate > 0
-                      ? `CGST (${halfGstPercent.toFixed(1)}%) + SGST (${halfGstPercent.toFixed(1)}%)`
-                      : 'GST Exempt / Disabled (0%)'}
-                  </Text>
-                  <Text style={styles.summaryVal}>₹{(cgst + sgst).toFixed(2)}</Text>
-                </View>
+                {gstEnabled && activeGstRate > 0 && (
+                  <View style={styles.summaryLine}>
+                    <Text style={styles.summaryLabel}>
+                      {`CGST (${halfGstPercent.toFixed(1)}%) + SGST (${halfGstPercent.toFixed(1)}%)`}
+                    </Text>
+                    <Text style={styles.summaryVal}>₹{(cgst + sgst).toFixed(2)}</Text>
+                  </View>
+                )}
                 <View style={styles.summaryDivider} />
                 <View style={styles.summaryLine}>
                   <Text style={styles.summaryTotalLabel}>Grand Total</Text>

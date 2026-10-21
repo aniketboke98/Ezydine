@@ -199,7 +199,7 @@ function formatReceiptText(data: {
     lines.push(centerText(token, width));
     lines.push(thinDivider);
     lines.push(justifyLine(`TABLE: ${tableNo}${section}`, `DINE-IN`, width));
-    lines.push(justifyLine(`Server: ${serverName}`, timeStr, width));
+    lines.push(justifyLine(`Order Time:`, timeStr, width));
     lines.push(thinDivider);
     lines.push(justifyLine('ITEM (PREPARATION)', 'QTY', width));
     lines.push(thinDivider);
@@ -256,7 +256,10 @@ function formatReceiptText(data: {
     if (currentLine) lines.push(centerText(currentLine, width));
   }
   if (phone) lines.push(centerText(`Ph: ${phone}`, width));
-  if (gstNo) lines.push(centerText(`GSTIN: ${gstNo}`, width));
+
+  // GST Settings: If GST is disabled in app/template, do not show GSTIN on bill
+  const showGst = tpl.showGst !== false && order.showGst !== false && order.gstEnabled !== false;
+  if (showGst && gstNo) lines.push(centerText(`GSTIN: ${gstNo}`, width));
 
   // Single clean divider into Bill Info (Removes excessive space)
   lines.push(thinDivider);
@@ -300,21 +303,23 @@ function formatReceiptText(data: {
   }
   lines.push(thinDivider);
 
-  // Financials & Summary
+  // Financials & Summary (If GST is disabled, do not show GST lines and do not add to total)
   const subtotal = parseFloat(order.subtotal || order.total || order.grandTotal || 0);
-  const cgst = parseFloat(order.cgst || (order.tax ? order.tax / 2 : 0));
-  const sgst = parseFloat(order.sgst || (order.tax ? order.tax / 2 : 0));
   const discount = parseFloat(order.discount || 0);
-  const grandTotal = parseFloat(order.grandTotal || order.total || (subtotal + cgst + sgst - discount));
+  const cgst = showGst ? parseFloat(order.cgst || (order.tax ? order.tax / 2 : 0)) : 0;
+  const sgst = showGst ? parseFloat(order.sgst || (order.tax ? order.tax / 2 : 0)) : 0;
+  const grandTotal = showGst
+    ? parseFloat(order.grandTotal || (subtotal + cgst + sgst - discount))
+    : (subtotal - discount);
 
   lines.push(justifyLine('Sub Total:', subtotal.toFixed(2), width));
   if (discount > 0) {
     lines.push(justifyLine('Discount:', `-${discount.toFixed(2)}`, width));
   }
-  if (cgst > 0) {
+  if (showGst && cgst > 0) {
     lines.push(justifyLine('CGST (2.5%):', cgst.toFixed(2), width));
   }
-  if (sgst > 0) {
+  if (showGst && sgst > 0) {
     lines.push(justifyLine('SGST (2.5%):', sgst.toFixed(2), width));
   }
   lines.push(divider);

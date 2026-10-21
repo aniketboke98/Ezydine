@@ -259,7 +259,7 @@ export const ReceiptSettingsModal: React.FC<ReceiptSettingsModalProps> = ({
                 <Text style={styles.previewItem}>2x Butter Naan             90.00</Text>
                 <Text style={styles.previewDivider}>--------------------------------</Text>
                 {showGst && <Text style={styles.previewMeta}>CGST 2.5% + SGST 2.5%      18.50</Text>}
-                <Text style={styles.previewTotal}>TOTAL:                  ₹388.50</Text>
+                <Text style={styles.previewTotal}>TOTAL:                  ₹{showGst ? '388.50' : '370.00'}</Text>
                 <Text style={styles.previewDivider}>--------------------------------</Text>
                 <Text style={styles.previewFooter}>{footerText}</Text>
               </View>

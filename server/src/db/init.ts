@@ -308,6 +308,10 @@ export async function initializeDatabase() {
     await client.query(`
       INSERT INTO menu_items (restaurant_id, name, category, price, is_veg, is_available, description)
       VALUES
+        ($1, 'Masala Dosa', 'South Indian', 120.00, true, true, 'Crispy rice crepe filled with spiced potato masala and served with coconut chutney & sambar'),
+        ($1, 'Idli Vada Combo', 'South Indian', 90.00, true, true, '2 steamed idlis and 1 crispy medu vada with hot sambar and coconut chutney'),
+        ($1, 'Samosa (2 pcs)', 'Snacks', 60.00, true, true, 'Flaky pastry stuffed with spiced potato and peas served with mint chutney'),
+        ($1, 'Paneer Pakoda', 'Snacks', 140.00, true, true, 'Crispy spiced gram-flour battered fresh cottage cheese fritters'),
         ($1, 'Paneer Butter Masala', 'Mains', 320.00, true, true, 'Rich cottage cheese in creamy tomato gravy'),
         ($1, 'Dal Makhani Royale', 'Mains', 260.00, true, true, 'Slow-cooked black lentils in butter and cream'),
         ($1, 'Garlic Naan', 'Breads', 70.00, true, true, 'Tandoori naan topped with roasted garlic and butter'),

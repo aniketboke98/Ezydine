@@ -39,7 +39,7 @@ const DEFAULT_DISH_IMAGES = {
   nonVeg: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=600&q=80',
 };
 
-const SUGGESTED_CATEGORIES = ['Starters', 'Mains', 'Breads', 'Beverages', 'Desserts'];
+const SUGGESTED_CATEGORIES = ['South Indian', 'Snacks', 'Starters', 'Mains', 'Breads', 'Beverages', 'Desserts'];
 
 export const MenuManagementScreen: React.FC<MenuManagementScreenProps> = ({
   onBack,

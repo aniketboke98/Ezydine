@@ -270,6 +270,30 @@ export async function seedDatabase() {
   });
 
   console.log('✅ Seeded Demo Manager: Phone 9800000001 | PIN 1234');
+
+  // Seed Menu Items for Demo Restaurant (Including South Indian and Snacks)
+  const demoDishes = [
+    { name: 'Masala Dosa', category: 'South Indian', price: 120, isVeg: true, isAvailable: true, description: 'Crispy rice crepe filled with spiced potato masala' },
+    { name: 'Idli Vada Combo', category: 'South Indian', price: 90, isVeg: true, isAvailable: true, description: '2 steamed idlis and 1 crispy medu vada with hot sambar' },
+    { name: 'Samosa (2 pcs)', category: 'Snacks', price: 60, isVeg: true, isAvailable: true, description: 'Golden flaky pastry with spiced potato and peas' },
+    { name: 'Paneer Pakoda', category: 'Snacks', price: 140, isVeg: true, isAvailable: true, description: 'Crispy gram-flour battered fresh cottage cheese fritters' },
+    { name: 'Pav Bhaji Special', category: 'Snacks', price: 160, isVeg: true, isAvailable: true, description: 'Spiced mashed vegetable curry served with toasted pav' },
+    { name: 'Paneer Butter Masala', category: 'Mains', price: 320, isVeg: true, isAvailable: true, description: 'Rich cottage cheese in creamy tomato gravy' },
+    { name: 'Dal Makhani Royale', category: 'Mains', price: 260, isVeg: true, isAvailable: true, description: 'Slow-cooked black lentils in butter & cream' },
+    { name: 'Garlic Naan', category: 'Breads', price: 70, isVeg: true, isAvailable: true, description: 'Tandoori naan topped with roasted garlic' },
+  ];
+
+  for (const dish of demoDishes) {
+    const existingDish = await prisma.menuItem.findFirst({
+      where: { restaurantId: demoRestaurant.id, name: dish.name }
+    });
+    if (!existingDish) {
+      await prisma.menuItem.create({
+        data: { ...dish, restaurantId: demoRestaurant.id }
+      });
+    }
+  }
+
   console.log('🎉 Database seeding complete!');
 }
 

@@ -187,6 +187,28 @@ const DEFAULT_FLOOR_TABLES: Table[] = [
   { id: 't11', number: 'TK-1', capacity: 0, section: 'Takeaway', status: 'available' },
 ];
 
+const DEFAULT_MENU_ITEMS: MenuItem[] = [
+  // South Indian
+  { id: 101, name: 'Masala Dosa', category: 'South Indian', price: 120, isVeg: true, isAvailable: true, description: 'Crispy rice crepe filled with spiced potato masala' },
+  { id: 102, name: 'Idli Vada Combo', category: 'South Indian', price: 90, isVeg: true, isAvailable: true, description: '2 steamed idlis and 1 crispy medu vada with hot sambar' },
+  { id: 103, name: 'Plain Dosa', category: 'South Indian', price: 90, isVeg: true, isAvailable: true, description: 'Golden roasted crispy plain crepe' },
+  { id: 104, name: 'Mysore Masala Dosa', category: 'South Indian', price: 140, isVeg: true, isAvailable: true, description: 'Crispy dosa smeared with red garlic chutney & potato bhaji' },
+  { id: 105, name: 'South Indian Filter Kaapi', category: 'South Indian', price: 50, isVeg: true, isAvailable: true, description: 'Aromatic frothy chicory filter coffee' },
+
+  // Snacks
+  { id: 201, name: 'Samosa (2 pcs)', category: 'Snacks', price: 60, isVeg: true, isAvailable: true, description: 'Crispy pastry stuffed with spiced potato and peas' },
+  { id: 202, name: 'Paneer Pakoda', category: 'Snacks', price: 140, isVeg: true, isAvailable: true, description: 'Spiced gram-flour battered fresh cottage cheese fritters' },
+  { id: 203, name: 'Pav Bhaji Special', category: 'Snacks', price: 160, isVeg: true, isAvailable: true, description: 'Butter mashed vegetable curry with 2 pav' },
+  { id: 204, name: 'Vada Pav (2 pcs)', category: 'Snacks', price: 70, isVeg: true, isAvailable: true, description: 'Iconic Mumbai potato vada inside pav with chutney' },
+  { id: 205, name: 'Crispy French Fries', category: 'Snacks', price: 110, isVeg: true, isAvailable: true, description: 'Golden salted potato fries' },
+
+  // Mains & Breads
+  { id: 301, name: 'Paneer Butter Masala', category: 'Mains', price: 320, isVeg: true, isAvailable: true, description: 'Rich cottage cheese in creamy tomato gravy' },
+  { id: 302, name: 'Dal Makhani Royale', category: 'Mains', price: 260, isVeg: true, isAvailable: true, description: 'Slow-cooked black lentils in butter & cream' },
+  { id: 303, name: 'Butter Chicken Special', category: 'Mains', price: 380, isVeg: false, isAvailable: true, description: 'Smoked chicken in classic fenugreek butter gravy' },
+  { id: 304, name: 'Garlic Naan', category: 'Breads', price: 70, isVeg: true, isAvailable: true, description: 'Tandoori naan topped with roasted garlic' },
+];
+
 export default function ManagerOrderPortal() {
   // Navigation & View Mode: 'pos' (floor billing) | 'history' (order history & reprint) | 'master' (App Logins & OTPs)
   const [currentView, setCurrentView] = useState<'pos' | 'history' | 'master'>('pos');
@@ -221,7 +243,7 @@ export default function ManagerOrderPortal() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Database-Synced Menu Items for this Manager's Restaurant
-  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>(DEFAULT_MENU_ITEMS);
   const [isMenuLoading, setIsMenuLoading] = useState(false);
 
   // Tables State & Table Orders Map (Stores active draft/placed order per table)
@@ -277,7 +299,7 @@ export default function ManagerOrderPortal() {
     showLogo: true,
     showGst: true,
     showFssai: true,
-    showCashier: true,
+    showCashier: false,
     headerText: 'Authentic Flavors · Fresh Ingredients',
     footerText: 'Thank you for dining with us! Visit again.',
     paperWidth: '80mm',
@@ -545,7 +567,14 @@ export default function ManagerOrderPortal() {
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.items)) {
-        setMenuItems(data.items);
+        if (data.items.length > 0) {
+          const complementary = DEFAULT_MENU_ITEMS.filter(
+            (d) => !data.items.some((i: any) => i.name.toLowerCase() === d.name.toLowerCase())
+          );
+          setMenuItems([...data.items, ...complementary]);
+        } else {
+          setMenuItems(DEFAULT_MENU_ITEMS);
+        }
       }
     } catch (e) {
       console.warn('Failed to fetch menu items from backend:', e);
@@ -945,13 +974,14 @@ export default function ManagerOrderPortal() {
     }
   };
 
-  // Dynamic Calculations for Active Cart
+  // Dynamic Calculations for Active Cart (GST is disabled and not applicable if ownerTemplate.showGst === false)
+  const isGstActive = ownerTemplate.showGst !== false;
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const discount = subtotal > 500 ? 40 : 0;
   const taxable = Math.max(0, subtotal - discount);
-  const cgst = taxable * 0.025;
-  const sgst = taxable * 0.025;
-  const total = Math.round(taxable + cgst + sgst);
+  const cgst = isGstActive ? taxable * 0.025 : 0;
+  const sgst = isGstActive ? taxable * 0.025 : 0;
+  const total = Math.round(taxable + (isGstActive ? (cgst + sgst) : 0));
 
   // Mark Order as Placed on Table & Print KOT
   const handlePrintKOT = () => {
@@ -1153,7 +1183,7 @@ export default function ManagerOrderPortal() {
     let text = '';
     if (mode === 'kot') {
       text = `*** KITCHEN ORDER TICKET ***\nTOKEN #${order.kotToken}\n${managerSession.restaurantName}\n` +
-        `Table: ${order.tableNumber} (${order.tableSection}) | Server: ${order.serverName}\n` +
+        `Table: ${order.tableNumber} (${order.tableSection})\n` +
         `Time: ${order.formattedTime} · ${order.formattedDate}\n` +
         `--------------------------------\n` +
         order.items.map((i: any) => `[${i.quantity}]  ${i.name} (${i.isVeg ? 'VEG' : 'NON-VEG'})`).join('\n') +
@@ -1166,7 +1196,6 @@ export default function ManagerOrderPortal() {
         (ownerTemplate.showFssai ? `FSSAI: ${managerSession.fssai || '11223344556677'}\n` : '') +
         `--------------------------------\n` +
         `${order.billNumber} | Table ${order.tableNumber} (${order.tableSection})\n` +
-        (ownerTemplate.showCashier ? `Cashier: ${order.serverName}\n` : '') +
         `Date: ${order.formattedDate} ${order.formattedTime}\n` +
         (order.customerName ? `Guest: ${order.customerName}\n` : '') +
         `--------------------------------\n` +
@@ -1174,8 +1203,7 @@ export default function ManagerOrderPortal() {
         `\n--------------------------------\n` +
         `Subtotal: ₹${order.subtotal.toFixed(2)}\n` +
         (order.discount > 0 ? `Discount: -₹${order.discount.toFixed(2)}\n` : '') +
-        `CGST (2.5%): ₹${order.cgst.toFixed(2)}\n` +
-        `SGST (2.5%): ₹${order.sgst.toFixed(2)}\n` +
+        (ownerTemplate.showGst ? `CGST (2.5%): ₹${order.cgst.toFixed(2)}\nSGST (2.5%): ₹${order.sgst.toFixed(2)}\n` : '') +
         `GRAND TOTAL: ₹${order.grandTotal.toFixed(2)}\n` +
         `Payment Mode: ${order.paymentMethod}\n` +
         `--------------------------------\n` +
@@ -1402,8 +1430,15 @@ export default function ManagerOrderPortal() {
     setTimeout(() => setPrintStatusMessage(null), 2500);
   };
 
-  // Categories
-  const categories = ['all', ...Array.from(new Set(menuItems.map((m) => m.category.toLowerCase())))];
+  // Categories - Always include South Indian & Snacks prominently
+  const defaultCategories = ['all', 'South Indian', 'Snacks', 'Starters', 'Mains', 'Breads', 'Beverages', 'Desserts'];
+  const dynamicCategories = Array.from(new Set(menuItems.map((m) => m.category))).filter(Boolean);
+  const categoryMap = new Map<string, string>();
+  [...defaultCategories, ...dynamicCategories].forEach((c) => {
+    const key = c.toLowerCase();
+    if (!categoryMap.has(key)) categoryMap.set(key, c);
+  });
+  const categories = Array.from(categoryMap.values());
 
   // Quick add dish
   const handleQuickAddDish = async (dishName: string) => {
@@ -2144,14 +2179,18 @@ export default function ManagerOrderPortal() {
                 </div>
               )}
 
-              <div className="flex justify-between text-[#64748B]">
-                <span>CGST (2.5% HSN 9963)</span>
-                <span>₹{cgst.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-[#64748B]">
-                <span>SGST (2.5% HSN 9963)</span>
-                <span>₹{sgst.toFixed(2)}</span>
-              </div>
+              {isGstActive && (
+                <>
+                  <div className="flex justify-between text-[#64748B]">
+                    <span>CGST (2.5% HSN 9963)</span>
+                    <span>₹{cgst.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-[#64748B]">
+                    <span>SGST (2.5% HSN 9963)</span>
+                    <span>₹{sgst.toFixed(2)}</span>
+                  </div>
+                </>
+              )}
 
               <div className="pt-2 border-t border-[#E2E8F0] flex justify-between items-center text-sm font-extrabold text-[#0B1B29]">
                 <span>Grand Total</span>
@@ -3582,7 +3621,7 @@ export default function ManagerOrderPortal() {
                     </div>
 
                     <div className="flex justify-between text-[11px]">
-                      {ownerTemplate.showCashier ? <span>Cashier: {generatedPrintData.order.serverName}</span> : <span />}
+                      <span>TABLE: {generatedPrintData.order.tableNumber} ({generatedPrintData.order.tableSection})</span>
                       <span>{generatedPrintData.order.formattedDate} {generatedPrintData.order.formattedTime}</span>
                     </div>
 
@@ -3631,14 +3670,18 @@ export default function ManagerOrderPortal() {
                           <span>-₹{generatedPrintData.order.discount.toFixed(2)}</span>
                         </div>
                       )}
-                      <div className="flex justify-between">
-                        <span>CGST (2.5%):</span>
-                        <span>₹{generatedPrintData.order.cgst.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>SGST (2.5%):</span>
-                        <span>₹{generatedPrintData.order.sgst.toFixed(2)}</span>
-                      </div>
+                      {ownerTemplate.showGst && (
+                        <>
+                          <div className="flex justify-between">
+                            <span>CGST (2.5%):</span>
+                            <span>₹{generatedPrintData.order.cgst.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>SGST (2.5%):</span>
+                            <span>₹{generatedPrintData.order.sgst.toFixed(2)}</span>
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     <div className="border-t border-black my-2" />
@@ -3796,7 +3839,7 @@ export default function ManagerOrderPortal() {
               <span>TABLE: {activeOrderForPrint.tableNumber} ({activeOrderForPrint.tableSection})</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              {ownerTemplate.showCashier ? <span>Cashier: {activeOrderForPrint.serverName}</span> : <span />}
+              <span>Date & Time:</span>
               <span>{activeOrderForPrint.formattedDate} {activeOrderForPrint.formattedTime}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
@@ -3834,14 +3877,18 @@ export default function ManagerOrderPortal() {
                 <span>-₹{activeOrderForPrint.discount.toFixed(2)}</span>
               </div>
             )}
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>CGST (2.5%):</span>
-              <span>₹{activeOrderForPrint.cgst.toFixed(2)}</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>SGST (2.5%):</span>
-              <span>₹{activeOrderForPrint.sgst.toFixed(2)}</span>
-            </div>
+            {ownerTemplate.showGst && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>CGST (2.5%):</span>
+                  <span>₹{activeOrderForPrint.cgst.toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>SGST (2.5%):</span>
+                  <span>₹{activeOrderForPrint.sgst.toFixed(2)}</span>
+                </div>
+              </>
+            )}
             <div style={{ borderTop: '1px solid #000', margin: '4px 0' }} />
             <div
               style={{
