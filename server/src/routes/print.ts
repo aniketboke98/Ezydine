@@ -88,7 +88,7 @@ router.get('/printers', async (req: Request, res: Response) => {
     if (activeUsb) {
       const normalizedUsbName = activeUsb.name.replace(/[^a-zA-Z0-9]/g, '_');
       for (const p of printers) {
-        if (p.name === normalizedUsbName || p.name.includes('POS_58') || p.name.includes('POS80')) {
+        if (p.name === normalizedUsbName || p.name.toLowerCase().includes(activeUsb.name.toLowerCase())) {
           p.status = 'idle'; // Physically connected and ready
         }
       }
