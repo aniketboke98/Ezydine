@@ -385,18 +385,36 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
-    let targetPrinter = printerName;
-
-    if (!targetPrinter || targetPrinter.includes('Default') || targetPrinter === 'Auto-Detect') {
-      const defaultMatch = printersOutput.match(/system default destination:\s*([^\n\r]+)/);
-      if (defaultMatch && defaultMatch[1]) {
-        targetPrinter = defaultMatch[1].trim();
-      } else {
-        const firstPrinterMatch = printersOutput.match(/printer\s+([^\s]+)/);
-        if (firstPrinterMatch && firstPrinterMatch[1]) {
-          targetPrinter = firstPrinterMatch[1].trim();
-        }
+    // Parse valid CUPS destination names from printersOutput
+    const validPrinters: string[] = [];
+    for (const line of printersOutput.split('\n')) {
+      const match = line.match(/^printer\s+([^\s]+)/);
+      if (match) {
+        validPrinters.push(match[1]);
       }
+    }
+
+    const defaultMatch = printersOutput.match(/system default destination:\s*([^\n\r]+)/);
+    const systemDefault = defaultMatch && defaultMatch[1] ? defaultMatch[1].trim() : (validPrinters[0] || '');
+
+    let targetPrinter = printerName ? String(printerName).trim() : '';
+
+    // If no printer requested or generic placeholder, use default
+    if (!targetPrinter || targetPrinter.includes('Default') || targetPrinter === 'Auto-Detect') {
+      targetPrinter = systemDefault;
+    } else if (!validPrinters.includes(targetPrinter)) {
+      // Find exact or closest match in valid CUPS printers (e.g. "KPrinte" -> "Printe_KPrinte" / "Printer_POS_58")
+      const cleanTarget = targetPrinter.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const matched = validPrinters.find(p => {
+        const cleanP = p.toLowerCase().replace(/[^a-z0-9]/g, '');
+        return cleanP === cleanTarget || cleanP.includes(cleanTarget) || cleanTarget.includes(cleanP);
+      });
+      targetPrinter = matched || systemDefault;
+    }
+
+    // If targetPrinter resolved to Printe_KPrinte (generic postscript) and Printer_POS_58 exists (actual POS-58 driver), prefer Printer_POS_58
+    if ((targetPrinter === 'Printe_KPrinte' || targetPrinter.toLowerCase().includes('kprinte')) && validPrinters.includes('Printer_POS_58')) {
+      targetPrinter = 'Printer_POS_58';
     }
 
     if (!targetPrinter) {
@@ -473,9 +491,25 @@ router.post('/', async (req: Request, res: Response) => {
           try { if (fs.existsSync(txtPath)) fs.unlinkSync(txtPath); } catch {}
         }, 3000);
       } catch (lpErr: any) {
-        // Retry raw binary with lp
-        dispatchOutput = await runCmd(`lp -d "${targetPrinter}" -o raw "${tmpFilePath}"`);
-        printedVia = `cups_raw (${targetPrinter})`;
+        console.warn(`lp standard failed for ${targetPrinter}, falling back to system default:`, lpErr.message);
+        if (targetPrinter !== systemDefault && systemDefault) {
+          try {
+            await runCmd(`cupsenable "${systemDefault}"`);
+            const plainText = formatReceiptText({ type, order, template, width: effectiveWidth });
+            const txtPath = path.join(os.tmpdir(), `ezydine_text_${Date.now()}.txt`);
+            fs.writeFileSync(txtPath, plainText, 'ascii');
+            dispatchOutput = await runCmd(`lp -d "${systemDefault}" "${txtPath}"`);
+            printedVia = `cups_lp (${systemDefault})`;
+            targetPrinter = systemDefault;
+            setTimeout(() => {
+              try { if (fs.existsSync(txtPath)) fs.unlinkSync(txtPath); } catch {}
+            }, 3000);
+          } catch (retryErr: any) {
+            throw retryErr;
+          }
+        } else {
+          throw lpErr;
+        }
       }
     }
 
