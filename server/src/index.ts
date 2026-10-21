@@ -30,7 +30,16 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check
+// Health & Info checks
+app.get(['/', '/api'], (req, res) => {
+  res.json({
+    status: 'online',
+    service: 'EzyDine Backend API',
+    database: 'PostgreSQL connected',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
