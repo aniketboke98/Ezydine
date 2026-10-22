@@ -115,6 +115,7 @@ interface ManagerSession {
   restaurantLocation?: string;
   restaurantPhone?: string;
   gstNumber?: string;
+  gstRate?: number | null;
   fssai?: string;
 }
 
@@ -132,7 +133,7 @@ const getApiBaseUrl = () => {
   if (typeof window !== 'undefined') {
     // If accessing from localhost / 127.0.0.1 (local dev / local POS counter)
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return 'http://localhost:5001/api';
+      return 'https://api.ezydine.in/api';
     }
     // If accessing from ezydine.in domain (e.g. manager.ezydine.in)
     if (window.location.hostname.includes('ezydine.in')) {
@@ -142,7 +143,7 @@ const getApiBaseUrl = () => {
   if (process.env.NEXT_PUBLIC_API_URL) {
     return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '');
   }
-  return 'http://localhost:5001/api';
+  return 'https://api.ezydine.in/api';
 };
 
 const apiFetch = async (endpoint: string, options: RequestInit = {}): Promise<Response> => {
@@ -160,8 +161,8 @@ const printApiFetch = async (endpoint: string, options: RequestInit = {}): Promi
   if (typeof window !== 'undefined') {
     // 1. Try local hardware counter printer agent first (runs on local counter machine at port 5001)
     const localCandidates = [
-      `http://127.0.0.1:5001/api${path}`,
-      `http://localhost:5001/api${path}`,
+      `https://api.ezydine.in/api${path}`,
+      `https://api.ezydine.in/api${path}`,
     ];
 
     for (const localUrl of localCandidates) {
@@ -328,17 +329,19 @@ export default function ManagerOrderPortal() {
     try {
       const storedSession = localStorage.getItem('ezydine_manager_session');
       let currentRestId: number | string | undefined = undefined;
+      let parsedSession: any = null;
 
       if (storedSession) {
-        const parsed = JSON.parse(storedSession);
-        setManagerSession(parsed);
-        currentRestId = parsed.restaurantId;
-        fetchRestaurantMenu(parsed.token);
-        fetchRestaurantTables(parsed.token, parsed.restaurantId);
-        fetchOrderHistory(parsed.token, parsed.restaurantId);
+        parsedSession = JSON.parse(storedSession);
+        setManagerSession(parsedSession);
+        currentRestId = parsedSession.restaurantId;
+        fetchRestaurantProfile(parsedSession.token);
+        fetchRestaurantMenu(parsedSession.token);
+        fetchRestaurantTables(parsedSession.token, parsedSession.restaurantId);
+        fetchOrderHistory(parsedSession.token, parsedSession.restaurantId);
 
         // Load order history for this restaurant
-        const historyKey = `ezydine_order_history_${parsed.restaurantId || 'default'}`;
+        const historyKey = `ezydine_order_history_${parsedSession.restaurantId || 'default'}`;
         const storedHistory = localStorage.getItem(historyKey);
         if (storedHistory) {
           try {
@@ -382,7 +385,30 @@ export default function ManagerOrderPortal() {
         setSelectedPaymentMethod(draft.paymentMethod || 'UPI');
       }
 
-      // 4. Update floor tables so all tables with items show as occupied with correct count & amount!
+      // 4. Load saved Owner Receipt Template
+      const templateKey = getOwnerTemplateKey(currentRestId);
+      const storedTemplate = localStorage.getItem(templateKey);
+      let loadedTemplate = ownerTemplate;
+      if (storedTemplate) {
+        try {
+          loadedTemplate = JSON.parse(storedTemplate);
+          setOwnerTemplate(loadedTemplate);
+        } catch {
+          // ignore
+        }
+      }
+
+      // Check if GST is active for initial table calculation
+      const hasValidGstOnInit = Boolean(
+        loadedTemplate.showGst &&
+        parsedSession?.gstNumber &&
+        parsedSession.gstNumber !== 'null' &&
+        parsedSession.gstNumber !== 'undefined' &&
+        parsedSession.gstNumber.trim().length > 0 &&
+        (parsedSession.gstRate == null || Number(parsedSession.gstRate) > 0)
+      );
+
+      // 5. Update floor tables so all tables with items show as occupied with correct count & amount!
       setFloorTables(
         FALLBACK_FLOOR_TABLES.map((t) => {
           const d = loadedTableOrders[t.id];
@@ -391,7 +417,7 @@ export default function ManagerOrderPortal() {
           const sub = hasItems ? d.cart.reduce((sum, item) => sum + item.price * item.quantity, 0) : 0;
           const disc = sub > 500 ? 40 : 0;
           const tax = Math.max(0, sub - disc);
-          const tot = Math.round(tax + tax * 0.05);
+          const tot = Math.round(tax + (hasValidGstOnInit ? tax * 0.05 : 0));
 
           return {
             ...t,
@@ -416,18 +442,6 @@ export default function ManagerOrderPortal() {
       const storedActive = localStorage.getItem('ezydine_active_printer');
       if (storedActive) {
         setActivePrinter(JSON.parse(storedActive));
-      }
-
-      // 5. Load saved Owner Receipt Template
-      const templateKey = getOwnerTemplateKey(currentRestId);
-      const storedTemplate = localStorage.getItem(templateKey);
-      if (storedTemplate) {
-        try {
-          const parsedTemplate = JSON.parse(storedTemplate);
-          setOwnerTemplate(parsedTemplate);
-        } catch {
-          // ignore
-        }
       }
       loadSystemPrinters();
     } catch {
@@ -503,7 +517,7 @@ export default function ManagerOrderPortal() {
     const tableSubtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const tableDiscount = tableSubtotal > 500 ? 40 : 0;
     const tableTaxable = Math.max(0, tableSubtotal - tableDiscount);
-    const tableTotal = Math.round(tableTaxable + tableTaxable * 0.05);
+    const tableTotal = Math.round(tableTaxable + (isGstActive ? tableTaxable * 0.05 : 0));
 
     setTableOrders((prev) => {
       let updated: Record<string, TableOrderDraft>;
@@ -577,6 +591,50 @@ export default function ManagerOrderPortal() {
       setMenuItems([]);
     } finally {
       setIsMenuLoading(false);
+    }
+  };
+
+  // Fetch Latest Live Restaurant Profile (to sync owner's GST/tax settings in real-time)
+  const fetchRestaurantProfile = async (token: string) => {
+    try {
+      const res = await apiFetch('/restaurant/profile', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success && (data.profile || data.restaurant)) {
+        const prof = data.profile || data.restaurant;
+        const rawGst = prof.gstNumber || prof.gst_number || '';
+        const cleanGst = (rawGst && rawGst !== 'null' && rawGst !== 'undefined') ? String(rawGst).trim() : '';
+        const rawRate = prof.gstRate ?? prof.gst_rate;
+        const numRate = rawRate != null ? Number(rawRate) : 0;
+
+        setManagerSession((prev) => {
+          if (!prev) return prev;
+          const updatedSession: ManagerSession = {
+            ...prev,
+            restaurantName: prof.name || prev.restaurantName,
+            restaurantLocation: prof.location || prev.restaurantLocation,
+            restaurantPhone: prof.phone || prev.restaurantPhone,
+            gstNumber: cleanGst,
+            gstRate: numRate,
+            fssai: prof.fssai || prev.fssai,
+          };
+          localStorage.setItem('ezydine_manager_session', JSON.stringify(updatedSession));
+          return updatedSession;
+        });
+
+        const hasValidGst = cleanGst.length > 0 && numRate > 0;
+        if (!hasValidGst) {
+          setOwnerTemplate((prev) => {
+            const nextTpl = { ...prev, showGst: false };
+            const key = getOwnerTemplateKey(prof.id);
+            localStorage.setItem(key, JSON.stringify(nextTpl));
+            return nextTpl;
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch restaurant profile:', e);
     }
   };
 
@@ -711,6 +769,11 @@ export default function ManagerOrderPortal() {
       const data = await res.json();
 
       if (data.success && data.manager) {
+        const rawGst = data.restaurant?.gstNumber || '';
+        const cleanGst = (rawGst && rawGst !== 'null' && rawGst !== 'undefined') ? String(rawGst).trim() : '';
+        const rawRate = data.restaurant?.gstRate ?? data.restaurant?.gst_rate;
+        const numRate = rawRate != null ? Number(rawRate) : 0;
+
         const session: ManagerSession = {
           token: data.token,
           name: data.manager.name,
@@ -720,7 +783,8 @@ export default function ManagerOrderPortal() {
           restaurantName: data.restaurant?.name || 'Restaurant',
           restaurantLocation: data.restaurant?.location || '',
           restaurantPhone: data.restaurant?.phone || '',
-          gstNumber: data.restaurant?.gstNumber || '',
+          gstNumber: cleanGst,
+          gstRate: numRate,
           fssai: data.restaurant?.fssai || '',
         };
         setManagerSession(session);
@@ -773,6 +837,25 @@ export default function ManagerOrderPortal() {
           setSelectedPaymentMethod('UPI');
         }
 
+        // Load saved Owner Receipt Template
+        const templateKey = getOwnerTemplateKey(session.restaurantId);
+        const storedTemplate = localStorage.getItem(templateKey);
+        let loadedTemplate = ownerTemplate;
+        if (storedTemplate) {
+          try {
+            loadedTemplate = JSON.parse(storedTemplate);
+            setOwnerTemplate(loadedTemplate);
+          } catch {
+            // ignore
+          }
+        }
+
+        const hasValidGstOnLogin = Boolean(
+          loadedTemplate.showGst &&
+          cleanGst.length > 0 &&
+          numRate > 0
+        );
+
         setFloorTables(
           FALLBACK_FLOOR_TABLES.map((t) => {
             const d = loadedOrders[t.id];
@@ -781,7 +864,7 @@ export default function ManagerOrderPortal() {
             const sub = hasItems ? d.cart.reduce((sum, item) => sum + item.price * item.quantity, 0) : 0;
             const disc = sub > 500 ? 40 : 0;
             const tax = Math.max(0, sub - disc);
-            const tot = Math.round(tax + tax * 0.05);
+            const tot = Math.round(tax + (hasValidGstOnLogin ? tax * 0.05 : 0));
 
             return {
               ...t,
@@ -794,17 +877,7 @@ export default function ManagerOrderPortal() {
           })
         );
 
-        // Load saved Owner Receipt Template
-        const templateKey = getOwnerTemplateKey(session.restaurantId);
-        const storedTemplate = localStorage.getItem(templateKey);
-        if (storedTemplate) {
-          try {
-            setOwnerTemplate(JSON.parse(storedTemplate));
-          } catch {
-            // ignore
-          }
-        }
-
+        fetchRestaurantProfile(data.token);
         fetchRestaurantMenu(data.token);
         fetchRestaurantTables(data.token, session.restaurantId);
         fetchOrderHistory(data.token, session.restaurantId);
@@ -1080,8 +1153,15 @@ export default function ManagerOrderPortal() {
     }
   };
 
-  // Dynamic Calculations for Active Cart (GST is disabled and not applicable if ownerTemplate.showGst === false)
-  const isGstActive = ownerTemplate.showGst !== false;
+  // Dynamic Calculations for Active Cart (GST is active ONLY if owner configured a non-null GSTIN, positive rate, and enabled it in template)
+  const hasValidGstin = Boolean(
+    managerSession?.gstNumber &&
+    managerSession.gstNumber !== 'null' &&
+    managerSession.gstNumber !== 'undefined' &&
+    managerSession.gstNumber.trim().length > 0
+  );
+  const isGstRateActive = managerSession?.gstRate == null || Number(managerSession.gstRate) > 0;
+  const isGstActive = Boolean(ownerTemplate.showGst && hasValidGstin && isGstRateActive);
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const discount = subtotal > 500 ? 40 : 0;
   const taxable = Math.max(0, subtotal - discount);
@@ -1305,8 +1385,15 @@ export default function ManagerOrderPortal() {
         (order.specialNote ? `Chef Note: ${order.specialNote}\n` : '') +
         `*** SEND TO KITCHEN PREPARATION ***`;
     } else {
+      const cleanGstNo = (isGstActive && managerSession.gstNumber && managerSession.gstNumber !== 'null' && managerSession.gstNumber !== 'undefined')
+        ? managerSession.gstNumber.trim()
+        : '';
+      const orderCgst = isGstActive ? (order.cgst || 0) : 0;
+      const orderSgst = isGstActive ? (order.sgst || 0) : 0;
+      const orderTotal = isGstActive ? order.grandTotal : (order.subtotal - (order.discount || 0));
+
       text = `${managerSession.restaurantName}\n${managerSession.restaurantLocation ? managerSession.restaurantLocation + '\n' : ''}${managerSession.restaurantPhone ? `Ph: ${managerSession.restaurantPhone}\n` : ''}` +
-        (ownerTemplate.showGst && managerSession.gstNumber ? `GSTIN: ${managerSession.gstNumber}\n` : '') +
+        (cleanGstNo ? `GSTIN: ${cleanGstNo}\n` : '') +
         (ownerTemplate.showFssai && managerSession.fssai ? `FSSAI: ${managerSession.fssai}\n` : '') +
         `--------------------------------\n` +
         `${order.billNumber} | Table ${order.tableNumber} (${order.tableSection})\n` +
@@ -1317,8 +1404,8 @@ export default function ManagerOrderPortal() {
         `\n--------------------------------\n` +
         `Subtotal: ₹${order.subtotal.toFixed(2)}\n` +
         (order.discount > 0 ? `Discount: -₹${order.discount.toFixed(2)}\n` : '') +
-        (ownerTemplate.showGst ? `CGST (2.5%): ₹${order.cgst.toFixed(2)}\nSGST (2.5%): ₹${order.sgst.toFixed(2)}\n` : '') +
-        `GRAND TOTAL: ₹${order.grandTotal.toFixed(2)}\n` +
+        (isGstActive && orderCgst > 0 ? `CGST (2.5%): ₹${orderCgst.toFixed(2)}\nSGST (2.5%): ₹${orderSgst.toFixed(2)}\n` : '') +
+        `GRAND TOTAL: ₹${orderTotal.toFixed(2)}\n` +
         `Payment Mode: ${order.paymentMethod}\n` +
         `--------------------------------\n` +
         `${ownerTemplate.footerText}\n`;
@@ -1361,6 +1448,10 @@ export default function ManagerOrderPortal() {
         return;
       }
 
+      const cleanGstForPrint = isGstActive && managerSession?.gstNumber && managerSession.gstNumber !== 'null' && managerSession.gstNumber !== 'undefined'
+        ? managerSession.gstNumber.trim()
+        : '';
+
       const res = await printApiFetch('/print', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1368,12 +1459,21 @@ export default function ManagerOrderPortal() {
           printerName: activePrinter.name,
           type: generatedPrintData.mode,
           width: activePrinter.paperWidth || '58mm',
-          order: currentOrder,
+          order: {
+            ...currentOrder,
+            showGst: isGstActive,
+            gstEnabled: isGstActive,
+            cgst: isGstActive ? (currentOrder.cgst || 0) : 0,
+            sgst: isGstActive ? (currentOrder.sgst || 0) : 0,
+            tax: isGstActive ? (currentOrder.tax || 0) : 0,
+            grandTotal: isGstActive ? currentOrder.grandTotal : (currentOrder.subtotal - (currentOrder.discount || 0)),
+          },
           template: {
             storeName: managerSession?.restaurantName || 'EZYDINE RESTOBAR',
             phone: managerSession?.restaurantPhone || managerSession?.identifier || '9876543210',
             address: managerSession?.restaurantLocation || 'Bengaluru, India',
-            gstNo: managerSession?.gstNumber || '',
+            gstNo: cleanGstForPrint,
+            showGst: isGstActive,
             footerMsg: ownerTemplate.footerText,
           },
         }),
@@ -3611,14 +3711,20 @@ export default function ManagerOrderPortal() {
                     <span className="text-[11px] font-medium text-[#0B1B29]">Show Logo</span>
                   </label>
 
-                  <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded-xl border border-[#E2E8F0]">
+                  <label className={`flex items-center gap-2 p-2 rounded-xl border border-[#E2E8F0] ${!hasValidGstin ? 'bg-gray-100 opacity-60 cursor-not-allowed' : 'bg-white cursor-pointer'}`}>
                     <input
                       type="checkbox"
-                      checked={ownerTemplate.showGst}
+                      checked={hasValidGstin && ownerTemplate.showGst}
+                      disabled={!hasValidGstin}
                       onChange={(e) => setOwnerTemplate((prev) => ({ ...prev, showGst: e.target.checked }))}
                       className="rounded text-[#D92F43]"
                     />
-                    <span className="text-[11px] font-medium text-[#0B1B29]">Show GSTIN</span>
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-medium text-[#0B1B29]">Show GSTIN</span>
+                      {!hasValidGstin && (
+                        <span className="text-[9px] text-[#94A3B8]">Disabled (Null in Profile)</span>
+                      )}
+                    </div>
                   </label>
 
                   <label className="flex items-center gap-2 cursor-pointer bg-white p-2 rounded-xl border border-[#E2E8F0]">
@@ -3758,8 +3864,8 @@ export default function ManagerOrderPortal() {
                       {managerSession.restaurantLocation ? <div className="text-[11px]">{managerSession.restaurantLocation}</div> : null}
                       {managerSession.restaurantPhone ? <div className="text-[11px]">Ph: {managerSession.restaurantPhone}</div> : null}
                       <div className="text-[10px] text-[#475569]">
-                        {ownerTemplate.showGst && managerSession.gstNumber ? `GSTIN: ${managerSession.gstNumber}` : ''}
-                        {ownerTemplate.showGst && managerSession.gstNumber && ownerTemplate.showFssai && managerSession.fssai ? ' • ' : ''}
+                        {isGstActive && managerSession.gstNumber && managerSession.gstNumber !== 'null' && managerSession.gstNumber !== 'undefined' ? `GSTIN: ${managerSession.gstNumber}` : ''}
+                        {isGstActive && managerSession.gstNumber && managerSession.gstNumber !== 'null' && managerSession.gstNumber !== 'undefined' && ownerTemplate.showFssai && managerSession.fssai ? ' • ' : ''}
                         {ownerTemplate.showFssai && managerSession.fssai ? `FSSAI: ${managerSession.fssai}` : ''}
                       </div>
                     </div>
@@ -3821,7 +3927,7 @@ export default function ManagerOrderPortal() {
                           <span>-₹{generatedPrintData.order.discount.toFixed(2)}</span>
                         </div>
                       )}
-                      {ownerTemplate.showGst && (
+                      {isGstActive && (generatedPrintData.order.cgst || 0) > 0 && (
                         <>
                           <div className="flex justify-between">
                             <span>CGST (2.5%):</span>
@@ -3839,7 +3945,12 @@ export default function ManagerOrderPortal() {
 
                     <div className="flex justify-between font-black text-sm my-1">
                       <span>GRAND TOTAL:</span>
-                      <span>₹{generatedPrintData.order.grandTotal.toFixed(2)}</span>
+                      <span>
+                        ₹{(isGstActive
+                          ? generatedPrintData.order.grandTotal
+                          : (generatedPrintData.order.subtotal - (generatedPrintData.order.discount || 0))
+                        ).toFixed(2)}
+                      </span>
                     </div>
 
                     <div className="flex justify-between text-[11px]">
@@ -3979,8 +4090,8 @@ export default function ManagerOrderPortal() {
               {managerSession.restaurantLocation ? <div>{managerSession.restaurantLocation}</div> : null}
               {managerSession.restaurantPhone ? <div>Ph: {managerSession.restaurantPhone}</div> : null}
               <div>
-                {ownerTemplate.showGst && managerSession.gstNumber ? `GSTIN: ${managerSession.gstNumber}` : ''}
-                {ownerTemplate.showGst && managerSession.gstNumber && ownerTemplate.showFssai && managerSession.fssai ? ' • ' : ''}
+                {isGstActive && managerSession.gstNumber && managerSession.gstNumber !== 'null' && managerSession.gstNumber !== 'undefined' ? `GSTIN: ${managerSession.gstNumber}` : ''}
+                {isGstActive && managerSession.gstNumber && managerSession.gstNumber !== 'null' && managerSession.gstNumber !== 'undefined' && ownerTemplate.showFssai && managerSession.fssai ? ' • ' : ''}
                 {ownerTemplate.showFssai && managerSession.fssai ? `FSSAI: ${managerSession.fssai}` : ''}
               </div>
             </div>
@@ -4028,7 +4139,7 @@ export default function ManagerOrderPortal() {
                 <span>-₹{activeOrderForPrint.discount.toFixed(2)}</span>
               </div>
             )}
-            {ownerTemplate.showGst && (
+            {isGstActive && (activeOrderForPrint.cgst || 0) > 0 && (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>CGST (2.5%):</span>
@@ -4051,7 +4162,12 @@ export default function ManagerOrderPortal() {
               }}
             >
               <span>GRAND TOTAL:</span>
-              <span>₹{activeOrderForPrint.grandTotal.toFixed(2)}</span>
+              <span>
+                ₹{(isGstActive
+                  ? activeOrderForPrint.grandTotal
+                  : (activeOrderForPrint.subtotal - (activeOrderForPrint.discount || 0))
+                ).toFixed(2)}
+              </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginTop: '2px' }}>
               <span>PAID VIA:</span>
