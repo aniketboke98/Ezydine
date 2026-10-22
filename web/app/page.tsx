@@ -130,6 +130,10 @@ export interface RealPrinterDevice {
 
 const getApiBaseUrl = () => {
   if (typeof window !== 'undefined') {
+    // If accessing from localhost / 127.0.0.1 (local dev / local POS counter)
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://localhost:5001/api';
+    }
     // If accessing from ezydine.in domain (e.g. manager.ezydine.in)
     if (window.location.hostname.includes('ezydine.in')) {
       return `${window.location.protocol}//api.ezydine.in/api`;
@@ -138,7 +142,7 @@ const getApiBaseUrl = () => {
   if (process.env.NEXT_PUBLIC_API_URL) {
     return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '');
   }
-  return 'https://api.ezydine.in/api';
+  return 'http://localhost:5001/api';
 };
 
 const apiFetch = async (endpoint: string, options: RequestInit = {}): Promise<Response> => {
@@ -154,19 +158,36 @@ const printApiFetch = async (endpoint: string, options: RequestInit = {}): Promi
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
   if (typeof window !== 'undefined') {
-    try {
-      const localController = new AbortController();
-      const localTimeout = setTimeout(() => localController.abort(), 1200);
-      const localRes = await fetch(`https://api.ezydine.in/api${path}`, {
-        ...options,
-        signal: localController.signal,
-      });
-      clearTimeout(localTimeout);
-      if (localRes.ok) {
-        return localRes;
+    // 1. Try local hardware counter printer agent first (runs on local counter machine at port 5001)
+    const localCandidates = [
+      `http://127.0.0.1:5001/api${path}`,
+      `http://localhost:5001/api${path}`,
+    ];
+
+    for (const localUrl of localCandidates) {
+      try {
+        const localController = new AbortController();
+        const localTimeout = setTimeout(() => localController.abort(), 2500);
+        const res = await fetch(localUrl, {
+          ...options,
+          signal: localController.signal,
+        });
+        clearTimeout(localTimeout);
+        if (res.ok) {
+          const clone = res.clone();
+          try {
+            const data = await clone.json();
+            // If local hardware returned real result (not cloud fallback message)
+            if (data && (data.printedVia || !data.fallbackToBrowser || (Array.isArray(data.printers) && data.printers.length > 0))) {
+              return res;
+            }
+          } catch {
+            return res;
+          }
+        }
+      } catch {
+        // Local agent port not responding on this candidate, try next
       }
-    } catch {
-      // Local counter print agent not active on this device, fall back to cloud
     }
   }
 
@@ -1360,9 +1381,12 @@ export default function ManagerOrderPortal() {
 
       const data = await res.json();
       if (data.success && data.printer) {
-        setPrintStatusMessage(`✓ Printed directly to ${data.printer}`);
+        setPrintStatusMessage(`✓ Printed directly to ${data.printer} (${data.printedVia || 'USB'})`);
       } else if (data.fallbackToBrowser) {
-        setPrintStatusMessage(`⚠️ ${data.message || 'No CUPS printer on server. Click "Print Slip" for system printer.'}`);
+        setPrintStatusMessage(`⚠️ ${data.message || 'Opening system print dialog...'}`);
+        setTimeout(() => {
+          window.print();
+        }, 500);
       } else {
         setPrintStatusMessage(`⚠️ Direct print error: ${data.error || 'Failed to dispatch to hardware'}`);
       }
@@ -1374,7 +1398,7 @@ export default function ManagerOrderPortal() {
       setTimeout(() => {
         setIsGeneratePrintOpen(false);
         setPrintStatusMessage(null);
-      }, 2500);
+      }, 3000);
     }
   };
 
@@ -1392,8 +1416,13 @@ export default function ManagerOrderPortal() {
         }),
       });
       const data = await res.json();
-      if (data.success) {
-        setPrintStatusMessage(`✓ Test slip printed directly on ${data.printer || activePrinter.name}`);
+      if (data.success && (data.printer || data.printedVia)) {
+        setPrintStatusMessage(`✓ Test slip printed directly on ${data.printer || activePrinter.name} (${data.printedVia || 'USB'})`);
+      } else if (data.fallbackToBrowser) {
+        setPrintStatusMessage(`⚠️ ${data.message || 'Opening system print...'}`);
+        setTimeout(() => {
+          window.print();
+        }, 500);
       } else {
         setPrintStatusMessage(`⚠️ Test failed: ${data.error || 'Could not print'}`);
       }
