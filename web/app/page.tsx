@@ -1348,6 +1348,158 @@ export default function ManagerOrderPortal() {
     }
   };
 
+  // Format raw ESC/POS binary buffer directly in the browser (for direct WebUSB & WebSerial printing without dialog)
+  const formatBrowserEscPosBuffer = (
+    mode: 'bill' | 'kot' | 'test',
+    order: any,
+    template: any,
+    width: '58mm' | '80mm' = '58mm'
+  ): Uint8Array => {
+    const is80mm = width === '80mm';
+    const lineWidth = is80mm ? 48 : 32;
+
+    const ESC = 0x1B;
+    const GS = 0x1D;
+    const bytes: number[] = [];
+
+    // Init printer
+    bytes.push(ESC, 0x40);
+
+    const addText = (str: string) => {
+      const encoder = new TextEncoder();
+      const encoded = encoder.encode(str);
+      for (let i = 0; i < encoded.length; i++) {
+        bytes.push(encoded[i]);
+      }
+    };
+
+    const addLine = (str: string = '') => {
+      addText(str + '\n');
+    };
+
+    // Header Center aligned
+    bytes.push(ESC, 0x61, 0x01); // Center
+    bytes.push(ESC, 0x45, 0x01); // Bold ON
+    bytes.push(GS, 0x21, 0x11);  // 2x size
+    addLine(template.storeName || 'EZYDINE RESTOBAR');
+    bytes.push(GS, 0x21, 0x00);  // Normal size
+    bytes.push(ESC, 0x45, 0x00); // Bold OFF
+
+    if (template.address) addLine(template.address);
+    if (template.phone) addLine(`Ph: ${template.phone}`);
+    if (template.gstNo) addLine(`GSTIN: ${template.gstNo}`);
+    addLine('-'.repeat(lineWidth));
+
+    // Order Info
+    bytes.push(ESC, 0x61, 0x00); // Left align
+    bytes.push(ESC, 0x45, 0x01); // Bold ON
+    if (mode === 'kot') {
+      addLine(`*** KITCHEN ORDER TICKET (KOT #${order.kotToken || 1}) ***`);
+    } else {
+      addLine(`${order.billNumber || 'Order #1'}`);
+    }
+    bytes.push(ESC, 0x45, 0x00); // Bold OFF
+    addLine(`Table: ${order.tableNumber || '01'} (${order.tableSection || 'Dine-In'})`);
+    addLine(`Date: ${order.formattedDate || new Date().toLocaleDateString('en-IN')}  Time: ${order.formattedTime || ''}`);
+    addLine('-'.repeat(lineWidth));
+
+    // Items
+    for (const it of (order.items || [])) {
+      const qty = it.quantity || 1;
+      const price = Number(it.price || 0) * qty;
+      const name = it.name.substring(0, Math.max(12, lineWidth - 12));
+      const priceStr = `₹${price.toFixed(2)}`;
+      const spaces = Math.max(1, lineWidth - (name.length + 3) - priceStr.length);
+      addLine(`[${qty}] ${name}${' '.repeat(spaces)}${priceStr}`);
+    }
+    addLine('-'.repeat(lineWidth));
+
+    // Financials
+    if (mode !== 'kot') {
+      const sub = `Subtotal:${' '.repeat(Math.max(1, lineWidth - 9 - `₹${Number(order.subtotal || 0).toFixed(2)}`.length))}₹${Number(order.subtotal || 0).toFixed(2)}`;
+      addLine(sub);
+      if (order.discount > 0) {
+        addLine(`Discount:${' '.repeat(Math.max(1, lineWidth - 9 - `-₹${Number(order.discount).toFixed(2)}`.length))}-₹${Number(order.discount).toFixed(2)}`);
+      }
+      if (template.showGst && order.cgst) {
+        addLine(`CGST (2.5%):${' '.repeat(Math.max(1, lineWidth - 12 - `₹${Number(order.cgst).toFixed(2)}`.length))}₹${Number(order.cgst).toFixed(2)}`);
+        addLine(`SGST (2.5%):${' '.repeat(Math.max(1, lineWidth - 12 - `₹${Number(order.sgst).toFixed(2)}`.length))}₹${Number(order.sgst).toFixed(2)}`);
+      }
+      bytes.push(ESC, 0x45, 0x01); // Bold ON
+      const tot = `GRAND TOTAL:${' '.repeat(Math.max(1, lineWidth - 12 - `₹${Number(order.grandTotal || 0).toFixed(2)}`.length))}₹${Number(order.grandTotal || 0).toFixed(2)}`;
+      addLine(tot);
+      bytes.push(ESC, 0x45, 0x00); // Bold OFF
+      addLine(`Payment Mode: ${order.paymentMethod || 'Cash'}`);
+      addLine('-'.repeat(lineWidth));
+    }
+
+    if (template.footerMsg) {
+      bytes.push(ESC, 0x61, 0x01); // Center
+      addLine(template.footerMsg);
+    }
+    addLine('Powered by EzyDine POS\n');
+
+    // Feed & Cut Paper
+    bytes.push(ESC, 0x64, 0x03); // Feed 3 lines
+    bytes.push(GS, 0x56, 0x00);  // Full cut
+
+    return new Uint8Array(bytes);
+  };
+
+  // Helper: Print directly via WebUSB in the browser (Windows / Chrome without any dialog)
+  const printViaBrowserWebUsb = async (data: Uint8Array): Promise<boolean> => {
+    if (typeof window === 'undefined' || !('usb' in navigator)) return false;
+    try {
+      const devices = await (navigator as any).usb.getDevices();
+      if (!devices || devices.length === 0) return false;
+      const device = devices[0];
+      await device.open();
+      if (device.configuration === null) {
+        await device.selectConfiguration(1);
+      }
+      let targetIface = 0;
+      for (const iface of device.configuration.interfaces) {
+        for (const alt of iface.alternates) {
+          if (alt.interfaceClass === 7) {
+            targetIface = iface.interfaceNumber;
+            break;
+          }
+        }
+      }
+      await device.claimInterface(targetIface);
+
+      const iface = device.configuration.interfaces.find((i: any) => i.interfaceNumber === targetIface) || device.configuration.interfaces[0];
+      const alt = iface.alternates[0];
+      const outEndpoint = alt.endpoints.find((e: any) => e.direction === 'out');
+      const epNum = outEndpoint ? outEndpoint.endpointNumber : 1;
+
+      await device.transferOut(epNum, data);
+      return true;
+    } catch (e) {
+      console.warn('WebUSB transfer error:', e);
+      return false;
+    }
+  };
+
+  // Helper: Print directly via Web Serial (COM port) in the browser
+  const printViaBrowserWebSerial = async (data: Uint8Array): Promise<boolean> => {
+    if (typeof window === 'undefined' || !('serial' in navigator)) return false;
+    try {
+      const ports = await (navigator as any).serial.getPorts();
+      if (!ports || ports.length === 0) return false;
+      const port = ports[0];
+      await port.open({ baudRate: 9600 });
+      const writer = port.writable.getWriter();
+      await writer.write(data);
+      writer.releaseLock();
+      await port.close();
+      return true;
+    } catch (e) {
+      console.warn('WebSerial transfer error:', e);
+      return false;
+    }
+  };
+
   // TRUE DIRECT PRINTING TO PHYSICAL HARDWARE (Zero Browser Pop-up / Dialog)
   const handleDirectHardwarePrint = async () => {
     setIsDirectPrinting(true);
@@ -1361,6 +1513,50 @@ export default function ManagerOrderPortal() {
         return;
       }
 
+      // Check if browser has a direct WebUSB device or WebSerial COM port available
+      const rawEscpos = formatBrowserEscPosBuffer(
+        generatedPrintData.mode,
+        currentOrder,
+        {
+          storeName: managerSession?.restaurantName || 'EZYDINE RESTOBAR',
+          phone: managerSession?.restaurantPhone || managerSession?.identifier || '',
+          address: managerSession?.restaurantLocation || '',
+          gstNo: ownerTemplate.showGst ? (managerSession?.gstNumber || '') : '',
+          showGst: ownerTemplate.showGst,
+          footerMsg: ownerTemplate.footerText,
+        },
+        activePrinter.paperWidth || '58mm'
+      );
+
+      // Attempt 1: WebUSB Direct (Chrome on Windows/Mac without dialog or server)
+      if (activePrinter.connectionType === 'usb' && 'usb' in navigator) {
+        const usbOk = await printViaBrowserWebUsb(rawEscpos);
+        if (usbOk) {
+          setPrintStatusMessage(`✓ Printed directly via WebUSB to ${activePrinter.name}`);
+          setIsDirectPrinting(false);
+          setTimeout(() => {
+            setIsGeneratePrintOpen(false);
+            setPrintStatusMessage(null);
+          }, 2500);
+          return;
+        }
+      }
+
+      // Attempt 2: WebSerial Direct (COM port on Windows)
+      if (activePrinter.connectionType === 'serial' && 'serial' in navigator) {
+        const serialOk = await printViaBrowserWebSerial(rawEscpos);
+        if (serialOk) {
+          setPrintStatusMessage(`✓ Printed directly via Serial COM to ${activePrinter.name}`);
+          setIsDirectPrinting(false);
+          setTimeout(() => {
+            setIsGeneratePrintOpen(false);
+            setPrintStatusMessage(null);
+          }, 2500);
+          return;
+        }
+      }
+
+      // Attempt 3: Local/Server Hardware Print Spooler
       const res = await printApiFetch('/print', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1381,24 +1577,21 @@ export default function ManagerOrderPortal() {
 
       const data = await res.json();
       if (data.success && data.printer) {
-        setPrintStatusMessage(`✓ Printed directly to ${data.printer} (${data.printedVia || 'USB'})`);
+        setPrintStatusMessage(`✓ Printed directly to ${data.printer} (${data.printedVia || 'Hardware'})`);
       } else if (data.fallbackToBrowser) {
-        setPrintStatusMessage(`⚠️ ${data.message || 'Opening system print dialog...'}`);
-        setTimeout(() => {
-          window.print();
-        }, 500);
+        setPrintStatusMessage(`⚠️ Direct print sent. If no printer attached, click "System Dialog".`);
       } else {
         setPrintStatusMessage(`⚠️ Direct print error: ${data.error || 'Failed to dispatch to hardware'}`);
       }
     } catch (err: any) {
       console.warn('Direct print backend unreachable:', err);
-      setPrintStatusMessage(`⚠️ Direct print error: ${err.message || 'Cannot reach local print service'}`);
+      setPrintStatusMessage(`⚠️ Print error: Pair USB printer via "Hardware Printer Setup" or click "System Dialog".`);
     } finally {
       setIsDirectPrinting(false);
       setTimeout(() => {
         setIsGeneratePrintOpen(false);
         setPrintStatusMessage(null);
-      }, 3000);
+      }, 3500);
     }
   };
 
@@ -1406,6 +1599,31 @@ export default function ManagerOrderPortal() {
     playReceiptChime();
     setPrintStatusMessage(`Sending test slip to ${activePrinter.name}...`);
     try {
+      const testOrder = {
+        billNumber: 'Test Slip',
+        tableNumber: '01',
+        tableSection: 'Counter',
+        formattedDate: new Date().toLocaleDateString('en-IN'),
+        formattedTime: new Date().toLocaleTimeString('en-IN'),
+        items: [{ name: 'Test Line', quantity: 1, price: 0 }],
+        subtotal: 0,
+        grandTotal: 0,
+        paymentMethod: 'TEST',
+      };
+      const rawEscpos = formatBrowserEscPosBuffer('test', testOrder, {
+        storeName: managerSession?.restaurantName || 'EZYDINE POS',
+        footerMsg: 'Direct Hardware Test Print OK!',
+      }, activePrinter.paperWidth || '58mm');
+
+      if (activePrinter.connectionType === 'usb' && 'usb' in navigator) {
+        const usbOk = await printViaBrowserWebUsb(rawEscpos);
+        if (usbOk) {
+          setPrintStatusMessage(`✓ Test slip printed directly via WebUSB!`);
+          setTimeout(() => setPrintStatusMessage(null), 3500);
+          return;
+        }
+      }
+
       const res = await printApiFetch('/print', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1419,10 +1637,7 @@ export default function ManagerOrderPortal() {
       if (data.success && (data.printer || data.printedVia)) {
         setPrintStatusMessage(`✓ Test slip printed directly on ${data.printer || activePrinter.name} (${data.printedVia || 'USB'})`);
       } else if (data.fallbackToBrowser) {
-        setPrintStatusMessage(`⚠️ ${data.message || 'Opening system print...'}`);
-        setTimeout(() => {
-          window.print();
-        }, 500);
+        setPrintStatusMessage(`⚠️ Hardware print agent not detected on this machine.`);
       } else {
         setPrintStatusMessage(`⚠️ Test failed: ${data.error || 'Could not print'}`);
       }

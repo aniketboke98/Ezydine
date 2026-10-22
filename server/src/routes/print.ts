@@ -41,9 +41,43 @@ async function getConnectedUsbPrinters(): Promise<Array<{ uri: string; name: str
   }
 }
 
+// Helper: Discover Windows printers using PowerShell
+async function getWindowsPrinters(): Promise<{ defaultPrinter: string; printers: Array<{ name: string; status: string; isDefault: boolean }> }> {
+  try {
+    const cmd = `powershell -NoProfile -Command "Get-CimInstance Win32_Printer | Select-Object Name, Default, PrinterStatus | ConvertTo-Json"`;
+    const out = await runCmd(cmd);
+    if (!out) return { defaultPrinter: '', printers: [] };
+    const parsed = JSON.parse(out);
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    let defaultPrinter = '';
+    const printers = list.map((p: any) => {
+      const isDef = Boolean(p.Default);
+      if (isDef) defaultPrinter = String(p.Name);
+      return {
+        name: String(p.Name),
+        status: 'idle',
+        isDefault: isDef,
+      };
+    });
+    return { defaultPrinter: defaultPrinter || (printers[0]?.name || ''), printers };
+  } catch (e) {
+    return { defaultPrinter: '', printers: [] };
+  }
+}
+
 // 1. GET Connected Printers
 router.get('/printers', async (req: Request, res: Response) => {
   try {
+    if (os.platform() === 'win32') {
+      const winData = await getWindowsPrinters();
+      return res.json({
+        success: true,
+        defaultPrinter: winData.defaultPrinter,
+        printers: winData.printers,
+        usbPrinters: [],
+      });
+    }
+
     let stdout = '';
     try {
       stdout = await runCmd('lpstat -p -d');
@@ -53,7 +87,7 @@ router.get('/printers', async (req: Request, res: Response) => {
         success: true,
         defaultPrinter: '',
         printers: [],
-        message: 'No CUPS hardware printers installed on backend host.',
+        message: 'No hardware thermal printers installed on backend host.',
       });
     }
 
@@ -377,30 +411,45 @@ router.post('/', async (req: Request, res: Response) => {
     const { printerName, type = 'bill', order, template, width = '58mm' } = req.body;
 
     // Discover system printers safely
-    let printersOutput = '';
-    try {
-      printersOutput = await runCmd('lpstat -p -d');
-    } catch {
-      // Server does not have local CUPS printers (e.g. cloud VPS)
-      return res.json({
-        success: true,
-        printedViaServer: false,
-        fallbackToBrowser: true,
-        message: 'No CUPS thermal printer configured on server. Handing off to browser printing.',
-      });
-    }
+    let validPrinters: string[] = [];
+    let systemDefault = '';
 
-    // Parse valid CUPS destination names from printersOutput
-    const validPrinters: string[] = [];
-    for (const line of printersOutput.split('\n')) {
-      const match = line.match(/^printer\s+([^\s]+)/);
-      if (match) {
-        validPrinters.push(match[1]);
+    if (os.platform() === 'win32') {
+      const winData = await getWindowsPrinters();
+      validPrinters = winData.printers.map(p => p.name);
+      systemDefault = winData.defaultPrinter || (validPrinters[0] || '');
+      if (validPrinters.length === 0) {
+        return res.json({
+          success: true,
+          printedViaServer: false,
+          fallbackToBrowser: true,
+          message: 'No hardware thermal printer configured on Windows machine.',
+        });
       }
-    }
+    } else {
+      let printersOutput = '';
+      try {
+        printersOutput = await runCmd('lpstat -p -d');
+      } catch {
+        // Server does not have local CUPS printers (e.g. cloud VPS)
+        return res.json({
+          success: true,
+          printedViaServer: false,
+          fallbackToBrowser: true,
+          message: 'No CUPS thermal printer configured on server. Handing off to browser printing.',
+        });
+      }
 
-    const defaultMatch = printersOutput.match(/system default destination:\s*([^\n\r]+)/);
-    const systemDefault = defaultMatch && defaultMatch[1] ? defaultMatch[1].trim() : (validPrinters[0] || '');
+      for (const line of printersOutput.split('\n')) {
+        const match = line.match(/^printer\s+([^\s]+)/);
+        if (match) {
+          validPrinters.push(match[1]);
+        }
+      }
+
+      const defaultMatch = printersOutput.match(/system default destination:\s*([^\n\r]+)/);
+      systemDefault = defaultMatch && defaultMatch[1] ? defaultMatch[1].trim() : (validPrinters[0] || '');
+    }
 
     // Detect physically connected USB hardware printer first
     const usbPrinters = await getConnectedUsbPrinters();
@@ -462,9 +511,27 @@ router.post('/', async (req: Request, res: Response) => {
     let printedVia = '';
     let dispatchOutput = '';
 
+    // Strategy 0: On Windows, dispatch via PowerShell Out-Printer or print /D to printer spooler
+    if (os.platform() === 'win32') {
+      try {
+        const escapedPrinter = targetPrinter.replace(/"/g, '`"');
+        const escapedFile = tmpFilePath.replace(/'/g, "''");
+        const psCmd = `powershell -NoProfile -Command "Get-Content -Path '${escapedFile}' -Encoding Byte -Raw | Out-Printer -Name '${escapedPrinter}'"`;
+        dispatchOutput = await runCmd(psCmd);
+        printedVia = `windows_spooler (${targetPrinter})`;
+      } catch (winErr: any) {
+        try {
+          dispatchOutput = await runCmd(`print /D:"${targetPrinter}" "${tmpFilePath}"`);
+          printedVia = `windows_cmd_print (${targetPrinter})`;
+        } catch (cmdErr: any) {
+          throw new Error(`Windows printing failed: ${winErr.message || cmdErr.message}`);
+        }
+      }
+    }
+
     // Strategy 1: On macOS, dispatch via native IOKit direct USB tool (talks directly to hardware)
     const nativeUsbBin = path.join(__dirname, '../utils/usb_print');
-    if (fs.existsSync(nativeUsbBin)) {
+    if (!printedVia && fs.existsSync(nativeUsbBin)) {
       try {
         dispatchOutput = await runCmd(`"${nativeUsbBin}" "${tmpFilePath}"`);
         if (dispatchOutput.includes('PRINT_SUCCESS')) {
