@@ -132,7 +132,7 @@ const getApiBaseUrl = () => {
   if (typeof window !== 'undefined') {
     // If accessing from localhost / 127.0.0.1 (local dev / local POS counter)
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      return 'http://localhost:5001/api';
+      return 'https://api.ezydine.in/api';
     }
     // If accessing from ezydine.in domain (e.g. manager.ezydine.in)
     if (window.location.hostname.includes('ezydine.in')) {
@@ -142,7 +142,7 @@ const getApiBaseUrl = () => {
   if (process.env.NEXT_PUBLIC_API_URL) {
     return process.env.NEXT_PUBLIC_API_URL.replace(/\/$/, '');
   }
-  return 'http://localhost:5001/api';
+  return 'https://api.ezydine.in/api';
 };
 
 const apiFetch = async (endpoint: string, options: RequestInit = {}): Promise<Response> => {
@@ -161,7 +161,7 @@ const printApiFetch = async (endpoint: string, options: RequestInit = {}): Promi
     // 1. Try local hardware counter printer agent first (runs on local counter machine at port 5001)
     const localCandidates = [
       `http://127.0.0.1:5001/api${path}`,
-      `http://localhost:5001/api${path}`,
+      `https://api.ezydine.in/api${path}`,
     ];
 
     for (const localUrl of localCandidates) {
