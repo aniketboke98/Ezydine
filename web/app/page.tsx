@@ -861,6 +861,19 @@ export default function ManagerOrderPortal() {
       if ('usb' in navigator) {
         const device = await (navigator as any).usb.requestDevice({ filters: [] });
         const name = device.productName || device.manufacturerName || `USB POS Printer (VID: ${device.vendorId})`;
+
+        // Test if Windows OS allows opening this device directly in browser
+        let canOpenDirectly = true;
+        try {
+          await device.open();
+          await device.close();
+        } catch (openErr: any) {
+          if (openErr.name === 'SecurityError' || openErr.message?.includes('Access denied')) {
+            canOpenDirectly = false;
+            console.warn('Windows has exclusive lock on this printer via usbprint.sys driver.');
+          }
+        }
+
         const newPrinter: RealPrinterDevice = {
           id: `usb_${device.vendorId}_${device.productId}_${Date.now()}`,
           name,
@@ -871,12 +884,19 @@ export default function ManagerOrderPortal() {
           productId: device.productId,
         };
         saveAndActivatePrinter(newPrinter);
+        if (!canOpenDirectly) {
+          setScanMessage(`Paired ${name}. (Windows Driver is locking raw USB. Spooling via printer service or Kiosk mode).`);
+        }
       } else {
         setScanError('WebUSB is not supported in this browser. Please use Chrome or select System Printer.');
       }
     } catch (err: any) {
       if (err.name !== 'NotFoundError') {
-        setScanError(err.message || 'Failed to detect USB device.');
+        if (err.name === 'SecurityError' || err.message?.includes('Access denied')) {
+          setScanError('Windows has locked this USB printer with its system driver. On Windows, please use "Serial / COM" or use Chrome Kiosk Silent Print mode.');
+        } else {
+          setScanError(err.message || 'Failed to detect USB device.');
+        }
       }
     } finally {
       setIsScanningPrinter(false);
@@ -1447,11 +1467,11 @@ export default function ManagerOrderPortal() {
   };
 
   // Helper: Print directly via WebUSB in the browser (Windows / Chrome without any dialog)
-  const printViaBrowserWebUsb = async (data: Uint8Array): Promise<boolean> => {
-    if (typeof window === 'undefined' || !('usb' in navigator)) return false;
+  const printViaBrowserWebUsb = async (data: Uint8Array): Promise<{ success: boolean; isWindowsLock?: boolean }> => {
+    if (typeof window === 'undefined' || !('usb' in navigator)) return { success: false };
     try {
       const devices = await (navigator as any).usb.getDevices();
-      if (!devices || devices.length === 0) return false;
+      if (!devices || devices.length === 0) return { success: false };
       const device = devices[0];
       await device.open();
       if (device.configuration === null) {
@@ -1474,10 +1494,14 @@ export default function ManagerOrderPortal() {
       const epNum = outEndpoint ? outEndpoint.endpointNumber : 1;
 
       await device.transferOut(epNum, data);
-      return true;
-    } catch (e) {
+      return { success: true };
+    } catch (e: any) {
+      if (e?.name === 'SecurityError' || e?.message?.includes('Access denied')) {
+        console.warn('[EzyDine] Windows kernel driver (usbprint.sys) has exclusive lock on this USB printer. Handing off to Spooler / Serial.');
+        return { success: false, isWindowsLock: true };
+      }
       console.warn('WebUSB transfer error:', e);
-      return false;
+      return { success: false };
     }
   };
 
@@ -1530,8 +1554,8 @@ export default function ManagerOrderPortal() {
 
       // Attempt 1: WebUSB Direct (Chrome on Windows/Mac without dialog or server)
       if (activePrinter.connectionType === 'usb' && 'usb' in navigator) {
-        const usbOk = await printViaBrowserWebUsb(rawEscpos);
-        if (usbOk) {
+        const usbResult = await printViaBrowserWebUsb(rawEscpos);
+        if (usbResult.success) {
           setPrintStatusMessage(`✓ Printed directly via WebUSB to ${activePrinter.name}`);
           setIsDirectPrinting(false);
           setTimeout(() => {
@@ -1539,6 +1563,9 @@ export default function ManagerOrderPortal() {
             setPrintStatusMessage(null);
           }, 2500);
           return;
+        }
+        if (usbResult.isWindowsLock) {
+          setPrintStatusMessage(`Windows driver has USB locked. Routing to system spooler...`);
         }
       }
 
@@ -1579,7 +1606,7 @@ export default function ManagerOrderPortal() {
       if (data.success && data.printer) {
         setPrintStatusMessage(`✓ Printed directly to ${data.printer} (${data.printedVia || 'Hardware'})`);
       } else if (data.fallbackToBrowser) {
-        setPrintStatusMessage(`⚠️ Direct print sent. If no printer attached, click "System Dialog".`);
+        setPrintStatusMessage(`⚠️ Windows driver locked USB. Use Chrome '--kiosk-printing' or Serial COM.`);
       } else {
         setPrintStatusMessage(`⚠️ Direct print error: ${data.error || 'Failed to dispatch to hardware'}`);
       }
@@ -1616,9 +1643,18 @@ export default function ManagerOrderPortal() {
       }, activePrinter.paperWidth || '58mm');
 
       if (activePrinter.connectionType === 'usb' && 'usb' in navigator) {
-        const usbOk = await printViaBrowserWebUsb(rawEscpos);
-        if (usbOk) {
+        const usbResult = await printViaBrowserWebUsb(rawEscpos);
+        if (usbResult.success) {
           setPrintStatusMessage(`✓ Test slip printed directly via WebUSB!`);
+          setTimeout(() => setPrintStatusMessage(null), 3500);
+          return;
+        }
+      }
+
+      if (activePrinter.connectionType === 'serial' && 'serial' in navigator) {
+        const serialOk = await printViaBrowserWebSerial(rawEscpos);
+        if (serialOk) {
+          setPrintStatusMessage(`✓ Test slip printed directly via Serial COM to ${activePrinter.name}!`);
           setTimeout(() => setPrintStatusMessage(null), 3500);
           return;
         }
@@ -1637,7 +1673,7 @@ export default function ManagerOrderPortal() {
       if (data.success && (data.printer || data.printedVia)) {
         setPrintStatusMessage(`✓ Test slip printed directly on ${data.printer || activePrinter.name} (${data.printedVia || 'USB'})`);
       } else if (data.fallbackToBrowser) {
-        setPrintStatusMessage(`⚠️ Hardware print agent not detected on this machine.`);
+        setPrintStatusMessage(`⚠️ Windows driver locked USB. Use Chrome '--kiosk-printing' or Serial COM.`);
       } else {
         setPrintStatusMessage(`⚠️ Test failed: ${data.error || 'Could not print'}`);
       }
@@ -3704,6 +3740,24 @@ export default function ManagerOrderPortal() {
                   })
                 )}
               </div>
+            </div>
+
+            {/* Windows 1-Click Silent Printing Helper */}
+            <div className="mt-4 p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-left">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-[#0B1B29] mb-1">
+                <Sparkles className="w-3.5 h-3.5 text-[#D92F43]" />
+                <span>Windows Silent Printing Tip</span>
+              </div>
+              <p className="text-[11px] text-[#64748B] leading-relaxed">
+                If Windows says <span className="font-semibold text-[#D92F43]">"Access Denied"</span> on USB, Windows OS has claimed the printer with its kernel driver.
+              </p>
+              <div className="mt-2 text-[11px] bg-white p-2 rounded-lg border border-[#E2E8F0] font-mono text-[#0B1B29] select-all">
+                chrome.exe --kiosk-printing http://localhost:3000
+              </div>
+              <p className="text-[10px] text-[#64748B] mt-1.5">
+                • <strong>Kiosk Silent Mode:</strong> Launch Chrome with the flag above to print silently with zero popups.<br />
+                • <strong>Serial / COM:</strong> Or click "Serial / COM" above to connect to your printer's virtual COM port.
+              </p>
             </div>
 
             <div className="mt-5 pt-4 border-t border-[#F1F5F9] grid grid-cols-2 gap-2">
