@@ -160,7 +160,7 @@ const printApiFetch = async (endpoint: string, options: RequestInit = {}): Promi
   if (typeof window !== 'undefined') {
     // 1. Try local hardware counter printer agent first (runs on local counter machine at port 5001)
     const localCandidates = [
-      `http://127.0.0.1:5001/api${path}`,
+      `https://api.ezydine.in/api${path}`,
       `https://api.ezydine.in/api${path}`,
     ];
 
