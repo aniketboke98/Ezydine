@@ -291,9 +291,9 @@ function formatReceiptText(data: {
   }
   if (phone) lines.push(centerText(`Ph: ${phone}`, width));
 
-  // GST Settings: If GST is disabled in app/template, do not show GSTIN on bill
-  const showGst = tpl.showGst !== false && order.showGst !== false && order.gstEnabled !== false;
-  if (showGst && gstNo) lines.push(centerText(`GSTIN: ${gstNo}`, width));
+  // GST Settings: If GST is disabled in app/template, do not show GSTIN or tax on bill
+  const showGst = Boolean(tpl.showGst) && Boolean(tpl.gstNo || gstNo) && order.showGst !== false && order.gstEnabled !== false;
+  if (showGst && (tpl.gstNo || gstNo)) lines.push(centerText(`GSTIN: ${tpl.gstNo || gstNo}`, width));
 
   // Single clean divider into Bill Info (Removes excessive space)
   lines.push(thinDivider);
