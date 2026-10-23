@@ -1375,21 +1375,60 @@ export default function ManagerOrderPortal() {
     template: any,
     width: '58mm' | '80mm' = '58mm'
   ): Uint8Array => {
+    // 58mm printers have 384 dots width = 30-32 chars max. 30 chars guarantees ZERO word wrapping or spillage.
+    // 80mm printers have 576 dots width = 42-48 chars max. 42 chars guarantees clean formatting.
     const is80mm = width === '80mm';
-    const lineWidth = is80mm ? 48 : 32;
+    const lineWidth = is80mm ? 42 : 30;
 
     const ESC = 0x1B;
     const GS = 0x1D;
     const bytes: number[] = [];
 
-    // Init printer
-    bytes.push(ESC, 0x40);
+    // Helper: word-wrap text at space boundaries so words are never cut in half
+    const wrapWords = (text: string, maxLen: number): string[] => {
+      if (!text) return [];
+      const words = String(text).trim().split(/\s+/);
+      const result: string[] = [];
+      let current = '';
+      for (const w of words) {
+        if (!current) {
+          current = w;
+        } else if ((current + ' ' + w).length <= maxLen) {
+          current += ' ' + w;
+        } else {
+          result.push(current);
+          current = w;
+        }
+      }
+      if (current) result.push(current);
+      return result;
+    };
 
+    // Helper: Center text cleanly
+    const center = (text: string, maxLen: number = lineWidth): string => {
+      const clean = String(text).trim().slice(0, maxLen);
+      const pad = Math.max(0, Math.floor((maxLen - clean.length) / 2));
+      return ' '.repeat(pad) + clean;
+    };
+
+    // Helper: Justify text (left and right aligned) within exact maxLen
+    const justify = (left: string, right: string, maxLen: number = lineWidth): string => {
+      const l = String(left).trim();
+      const r = String(right).trim();
+      const space = maxLen - l.length - r.length;
+      if (space <= 0) {
+        const cutLeft = Math.max(1, maxLen - r.length - 1);
+        return l.slice(0, cutLeft) + ' ' + r;
+      }
+      return l + ' '.repeat(space) + r;
+    };
+
+    // Add string as single-byte ASCII
     const addText = (str: string) => {
-      const encoder = new TextEncoder();
-      const encoded = encoder.encode(str);
-      for (let i = 0; i < encoded.length; i++) {
-        bytes.push(encoded[i]);
+      for (let i = 0; i < str.length; i++) {
+        const code = str.charCodeAt(i);
+        // Map any non-ASCII character to ASCII to prevent multi-byte garbage on thermal printer
+        bytes.push(code <= 127 ? code : 0x20);
       }
     };
 
@@ -1397,67 +1436,180 @@ export default function ManagerOrderPortal() {
       addText(str + '\n');
     };
 
-    // Header Center aligned
+    // Initialize printer
+    bytes.push(ESC, 0x40);
+
+    // ==========================================
+    // 1. HARDWARE TEST SLIP
+    // ==========================================
+    if (mode === 'test') {
+      bytes.push(ESC, 0x61, 0x01); // Center
+      bytes.push(ESC, 0x45, 0x01); // Bold ON
+      addLine((template.storeName || 'EZYDINE POS').toUpperCase().slice(0, lineWidth));
+      bytes.push(ESC, 0x45, 0x00); // Bold OFF
+      addLine('='.repeat(lineWidth));
+      addLine('** HARDWARE TEST SLIP **');
+      addLine('='.repeat(lineWidth));
+      bytes.push(ESC, 0x61, 0x00); // Left
+      addLine(justify('Printer Status:', 'ONLINE / READY'));
+      addLine(justify('Paper Roll:', is80mm ? '80mm (42 Col)' : '58mm (30 Col)'));
+      addLine(justify('Date:', new Date().toLocaleDateString('en-IN')));
+      addLine(justify('Time:', new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })));
+      addLine('-'.repeat(lineWidth));
+      bytes.push(ESC, 0x61, 0x01); // Center
+      addLine('Direct Hardware Link OK!');
+      addLine('='.repeat(lineWidth));
+      bytes.push(ESC, 0x64, 0x03); // Feed 3 lines
+      bytes.push(GS, 0x56, 0x00);  // Full cut
+      return new Uint8Array(bytes);
+    }
+
+    // ==========================================
+    // 2. STORE HEADER (Center Aligned, Word Wrapped)
+    // ==========================================
     bytes.push(ESC, 0x61, 0x01); // Center
     bytes.push(ESC, 0x45, 0x01); // Bold ON
-    bytes.push(GS, 0x21, 0x11);  // 2x size
-    addLine(template.storeName || 'EZYDINE RESTOBAR');
-    bytes.push(GS, 0x21, 0x00);  // Normal size
-    bytes.push(ESC, 0x45, 0x00); // Bold OFF
 
-    if (template.address) addLine(template.address);
-    if (template.phone) addLine(`Ph: ${template.phone}`);
-    if (template.gstNo) addLine(`GSTIN: ${template.gstNo}`);
-    addLine('-'.repeat(lineWidth));
-
-    // Order Info
-    bytes.push(ESC, 0x61, 0x00); // Left align
-    bytes.push(ESC, 0x45, 0x01); // Bold ON
-    if (mode === 'kot') {
-      addLine(`*** KITCHEN ORDER TICKET (KOT #${order.kotToken || 1}) ***`);
+    const storeName = (template.storeName || 'EZYDINE RESTOBAR').toUpperCase();
+    if (storeName.length <= 15) {
+      bytes.push(GS, 0x21, 0x11); // Double size for short titles
+      addLine(storeName);
+      bytes.push(GS, 0x21, 0x00); // Reset normal size
     } else {
-      addLine(`${order.billNumber || 'Order #1'}`);
+      // For longer titles, print bold at normal size so it never spills over
+      for (const line of wrapWords(storeName, lineWidth)) {
+        addLine(line);
+      }
     }
     bytes.push(ESC, 0x45, 0x00); // Bold OFF
-    addLine(`Table: ${order.tableNumber || '01'} (${order.tableSection || 'Dine-In'})`);
-    addLine(`Date: ${order.formattedDate || new Date().toLocaleDateString('en-IN')}  Time: ${order.formattedTime || ''}`);
+
+    if (template.address) {
+      for (const line of wrapWords(template.address, lineWidth)) {
+        addLine(line);
+      }
+    }
+    if (template.phone) addLine(`Ph: ${template.phone}`);
+    if (template.gstNo && mode !== 'kot') addLine(`GSTIN: ${template.gstNo}`);
     addLine('-'.repeat(lineWidth));
 
-    // Items
+    // ==========================================
+    // 3. KITCHEN ORDER TICKET (KOT)
+    // ==========================================
+    if (mode === 'kot') {
+      bytes.push(ESC, 0x61, 0x01); // Center
+      bytes.push(ESC, 0x45, 0x01); // Bold ON
+      addLine('*** KITCHEN ORDER TICKET ***');
+      addLine(`KOT TOKEN #${order.kotToken || 1}`);
+      bytes.push(ESC, 0x45, 0x00); // Bold OFF
+      bytes.push(ESC, 0x61, 0x00); // Left align
+      addLine('-'.repeat(lineWidth));
+
+      const tableText = `TABLE: ${order.tableNumber || '01'}${order.tableSection ? ` (${order.tableSection})` : ''}`;
+      addLine(justify(tableText, 'DINE-IN'));
+
+      const dateStr = order.formattedDate || new Date().toLocaleDateString('en-IN');
+      const timeStr = order.formattedTime || new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      addLine(justify(`Date: ${dateStr}`, timeStr));
+      addLine('-'.repeat(lineWidth));
+
+      // Items list (NO PRICES on KOT - strictly preparation copy)
+      addLine(justify('ITEM (PREPARATION)', 'QTY'));
+      addLine('-'.repeat(lineWidth));
+
+      bytes.push(ESC, 0x45, 0x01); // Bold ON for Chef
+      for (const it of (order.items || [])) {
+        const qty = it.quantity || 1;
+        const name = (it.name || 'Item').trim();
+        addLine(justify(name, `x${qty}`));
+        if (it.notes || it.specialNote) {
+          bytes.push(ESC, 0x45, 0x00);
+          addLine(` * Note: ${String(it.notes || it.specialNote).trim()}`);
+          bytes.push(ESC, 0x45, 0x01);
+        }
+      }
+      bytes.push(ESC, 0x45, 0x00); // Bold OFF
+      addLine('-'.repeat(lineWidth));
+
+      bytes.push(ESC, 0x61, 0x01); // Center
+      addLine('-- Expedite Kitchen Order --');
+      bytes.push(ESC, 0x64, 0x03); // Feed 3 lines
+      bytes.push(GS, 0x56, 0x00);  // Full cut
+      return new Uint8Array(bytes);
+    }
+
+    // ==========================================
+    // 4. CUSTOMER TAX INVOICE / CASH BILL
+    // ==========================================
+    bytes.push(ESC, 0x61, 0x00); // Left align
+    const billNum = order.billNumber || 'Order #1';
+    const tableText = `Table: ${order.tableNumber || '01'}${order.tableSection ? ` (${order.tableSection})` : ''}`;
+    addLine(justify(billNum, tableText));
+
+    const dateStr = order.formattedDate || new Date().toLocaleDateString('en-IN');
+    const timeStr = order.formattedTime || new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    addLine(justify(`Date: ${dateStr}`, timeStr));
+
+    if (order.customerName) {
+      addLine(`Guest: ${order.customerName.trim().slice(0, lineWidth - 7)}`);
+    }
+    addLine('-'.repeat(lineWidth));
+
+    // Column Headers
+    addLine(justify('ITEM', 'QTY    AMOUNT'));
+    addLine('-'.repeat(lineWidth));
+
+    // Items List (Clean formatting, NO multi-byte Rupee glyphs)
     for (const it of (order.items || [])) {
       const qty = it.quantity || 1;
       const price = Number(it.price || 0) * qty;
-      const name = it.name.substring(0, Math.max(12, lineWidth - 12));
-      const priceStr = `₹${price.toFixed(2)}`;
-      const spaces = Math.max(1, lineWidth - (name.length + 3) - priceStr.length);
-      addLine(`[${qty}] ${name}${' '.repeat(spaces)}${priceStr}`);
+      const name = (it.name || 'Item').trim();
+
+      // 30-col layout: Name max 15 chars + Qty 5 chars + Amount 10 chars = 30 chars
+      const nameLimit = Math.max(12, lineWidth - 15);
+      const colName = name.slice(0, nameLimit).padEnd(nameLimit);
+      const colQty = `x${qty}`.padStart(5);
+      const colAmt = price.toFixed(2).padStart(10);
+      addLine(`${colName}${colQty}${colAmt}`);
     }
     addLine('-'.repeat(lineWidth));
 
-    // Financials
-    if (mode !== 'kot') {
-      const sub = `Subtotal:${' '.repeat(Math.max(1, lineWidth - 9 - `₹${Number(order.subtotal || 0).toFixed(2)}`.length))}₹${Number(order.subtotal || 0).toFixed(2)}`;
-      addLine(sub);
-      if (order.discount > 0) {
-        addLine(`Discount:${' '.repeat(Math.max(1, lineWidth - 9 - `-₹${Number(order.discount).toFixed(2)}`.length))}-₹${Number(order.discount).toFixed(2)}`);
-      }
-      if (template.showGst && order.cgst) {
-        addLine(`CGST (2.5%):${' '.repeat(Math.max(1, lineWidth - 12 - `₹${Number(order.cgst).toFixed(2)}`.length))}₹${Number(order.cgst).toFixed(2)}`);
-        addLine(`SGST (2.5%):${' '.repeat(Math.max(1, lineWidth - 12 - `₹${Number(order.sgst).toFixed(2)}`.length))}₹${Number(order.sgst).toFixed(2)}`);
-      }
-      bytes.push(ESC, 0x45, 0x01); // Bold ON
-      const tot = `GRAND TOTAL:${' '.repeat(Math.max(1, lineWidth - 12 - `₹${Number(order.grandTotal || 0).toFixed(2)}`.length))}₹${Number(order.grandTotal || 0).toFixed(2)}`;
-      addLine(tot);
-      bytes.push(ESC, 0x45, 0x00); // Bold OFF
-      addLine(`Payment Mode: ${order.paymentMethod || 'Cash'}`);
-      addLine('-'.repeat(lineWidth));
+    // Financials & Summary (100% Standard ASCII - Completely fixes Γé╣)
+    const subtotal = Number(order.subtotal || 0);
+    const discount = Number(order.discount || 0);
+    const cgst = Number(order.cgst || 0);
+    const sgst = Number(order.sgst || 0);
+    const grandTotal = Number(order.grandTotal || 0);
+
+    addLine(justify('Subtotal:', subtotal.toFixed(2)));
+    if (discount > 0) {
+      addLine(justify('Discount:', `-${discount.toFixed(2)}`));
+    }
+    if (template.showGst && cgst > 0) {
+      addLine(justify('CGST (2.5%):', cgst.toFixed(2)));
+    }
+    if (template.showGst && sgst > 0) {
+      addLine(justify('SGST (2.5%):', sgst.toFixed(2)));
     }
 
+    addLine('='.repeat(lineWidth));
+    bytes.push(ESC, 0x45, 0x01); // Bold ON
+    addLine(justify('GRAND TOTAL:', `Rs. ${grandTotal.toFixed(2)}`));
+    bytes.push(ESC, 0x45, 0x00); // Bold OFF
+    addLine('='.repeat(lineWidth));
+
+    const payMode = (order.paymentMethod || 'CASH').toUpperCase();
+    addLine(justify(`Payment: ${payMode}`, 'Status: PAID'));
+    addLine('-'.repeat(lineWidth));
+
+    // Closing Footer
     if (template.footerMsg) {
       bytes.push(ESC, 0x61, 0x01); // Center
-      addLine(template.footerMsg);
+      for (const line of wrapWords(template.footerMsg, lineWidth)) {
+        addLine(line);
+      }
     }
-    addLine('Powered by EzyDine POS\n');
+    bytes.push(ESC, 0x61, 0x01); // Center
+    addLine('Powered by EzyDine POS');
 
     // Feed & Cut Paper
     bytes.push(ESC, 0x64, 0x03); // Feed 3 lines
@@ -4283,29 +4435,29 @@ export default function ManagerOrderPortal() {
               <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', margin: '2px 0' }}>
                 <span style={{ flex: 1 }}>{c.name}</span>
                 <span style={{ width: '30px', textAlign: 'center' }}>{c.quantity}</span>
-                <span style={{ width: '60px', textAlign: 'right' }}>₹{(c.price * c.quantity).toFixed(2)}</span>
+                <span style={{ width: '60px', textAlign: 'right' }}>{(c.price * c.quantity).toFixed(2)}</span>
               </div>
             ))}
             <div style={{ borderTop: '1px dashed #000', margin: '4px 0' }} />
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span>Subtotal:</span>
-              <span>₹{activeOrderForPrint.subtotal.toFixed(2)}</span>
+              <span>{activeOrderForPrint.subtotal.toFixed(2)}</span>
             </div>
             {activeOrderForPrint.discount > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>Discount:</span>
-                <span>-₹{activeOrderForPrint.discount.toFixed(2)}</span>
+                <span>-{activeOrderForPrint.discount.toFixed(2)}</span>
               </div>
             )}
             {ownerTemplate.showGst && (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>CGST (2.5%):</span>
-                  <span>₹{activeOrderForPrint.cgst.toFixed(2)}</span>
+                  <span>{activeOrderForPrint.cgst.toFixed(2)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span>SGST (2.5%):</span>
-                  <span>₹{activeOrderForPrint.sgst.toFixed(2)}</span>
+                  <span>{activeOrderForPrint.sgst.toFixed(2)}</span>
                 </div>
               </>
             )}
@@ -4320,7 +4472,7 @@ export default function ManagerOrderPortal() {
               }}
             >
               <span>GRAND TOTAL:</span>
-              <span>₹{activeOrderForPrint.grandTotal.toFixed(2)}</span>
+              <span>Rs. {activeOrderForPrint.grandTotal.toFixed(2)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginTop: '2px' }}>
               <span>PAID VIA:</span>
