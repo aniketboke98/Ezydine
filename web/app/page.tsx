@@ -42,6 +42,7 @@ import {
   Key,
   Smartphone,
   UserPlus,
+  Percent,
 } from 'lucide-react';
 
 interface MenuItem {
@@ -79,6 +80,8 @@ interface TableOrderDraft {
   paymentMethod: 'Cash' | 'UPI' | 'Card';
   status: 'available' | 'occupied' | 'billing';
   placedAt?: string;
+  discountType?: 'flat' | 'percent';
+  discountValue?: number;
 }
 
 export interface OrderHistoryItem {
@@ -259,6 +262,9 @@ export default function ManagerOrderPortal() {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'Cash' | 'UPI' | 'Card'>('UPI');
+  const [discountType, setDiscountType] = useState<'flat' | 'percent'>('flat');
+  const [discountValue, setDiscountValue] = useState<number>(0);
+  const [isDiscountOpen, setIsDiscountOpen] = useState(false);
 
   // Order History State (Persisted in localStorage)
   const [orderHistory, setOrderHistory] = useState<OrderHistoryItem[]>([]);
@@ -297,12 +303,12 @@ export default function ManagerOrderPortal() {
     paperWidth: '58mm' | '80mm';
   }>({
     showLogo: true,
-    showGst: true,
-    showFssai: true,
+    showGst: false,
+    showFssai: false,
     showCashier: false,
     headerText: 'Authentic Flavors · Fresh Ingredients',
     footerText: 'Thank you for dining with us! Visit again.',
-    paperWidth: '80mm',
+    paperWidth: '58mm',
   });
 
   // Dedicated "Generate Print" View in Owner-Saved Template (Replaces automatic system print dialog)
@@ -382,6 +388,8 @@ export default function ManagerOrderPortal() {
         setCustomerName(draft.customerName || '');
         setCustomerPhone(draft.customerPhone || '');
         setSelectedPaymentMethod(draft.paymentMethod || 'UPI');
+        setDiscountType(draft.discountType || 'flat');
+        setDiscountValue(draft.discountValue || 0);
       }
 
       // 4. Update floor tables so all tables with items show as occupied with correct count & amount!
@@ -463,6 +471,8 @@ export default function ManagerOrderPortal() {
         status: (cart.length > 0 ? 'occupied' : 'available') as 'occupied' | 'available',
         kotToken: tableOrders[selectedTable.id]?.kotToken,
         placedAt: tableOrders[selectedTable.id]?.placedAt,
+        discountType,
+        discountValue,
       };
       const updated = {
         ...tableOrders,
@@ -486,12 +496,16 @@ export default function ManagerOrderPortal() {
       setCustomerName(nextDraft.customerName || '');
       setCustomerPhone(nextDraft.customerPhone || '');
       setSelectedPaymentMethod(nextDraft.paymentMethod || 'UPI');
+      setDiscountType(nextDraft.discountType || 'flat');
+      setDiscountValue(nextDraft.discountValue || 0);
     } else {
       setCart([]);
       setSpecialNote('');
       setCustomerName('');
       setCustomerPhone('');
       setSelectedPaymentMethod('UPI');
+      setDiscountType('flat');
+      setDiscountValue(0);
     }
   };
 
@@ -503,13 +517,18 @@ export default function ManagerOrderPortal() {
     const hasItems = cart.length > 0;
     const count = cart.reduce((sum, item) => sum + item.quantity, 0);
     const tableSubtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const tableDiscount = tableSubtotal > 500 ? 40 : 0;
+    const tableDiscount = Math.min(
+      tableSubtotal,
+      discountType === 'percent'
+        ? Math.round((tableSubtotal * (discountValue || 0)) / 100)
+        : Math.max(0, discountValue || 0)
+    );
     const tableTaxable = Math.max(0, tableSubtotal - tableDiscount);
-    const tableTotal = Math.round(tableTaxable + tableTaxable * 0.05);
+    const tableTotal = Math.round(tableTaxable + (ownerTemplate.showGst ? tableTaxable * 0.05 : 0));
 
     setTableOrders((prev) => {
       let updated: Record<string, TableOrderDraft>;
-      if (!hasItems && !specialNote.trim() && !customerName.trim() && !customerPhone.trim()) {
+      if (!hasItems && !specialNote.trim() && !customerName.trim() && !customerPhone.trim() && discountValue === 0) {
         updated = { ...prev };
         delete updated[tableId];
       } else {
@@ -524,6 +543,8 @@ export default function ManagerOrderPortal() {
             status: (hasItems ? 'occupied' : 'available') as 'occupied' | 'available',
             kotToken: prev[tableId]?.kotToken,
             placedAt: prev[tableId]?.placedAt,
+            discountType,
+            discountValue,
           },
         };
       }
@@ -549,7 +570,7 @@ export default function ManagerOrderPortal() {
 
     const selKey = getSelectedTableIdKey(managerSession?.restaurantId);
     localStorage.setItem(selKey, String(tableId));
-  }, [cart, specialNote, customerName, customerPhone, selectedPaymentMethod, selectedTable.id, managerSession?.restaurantId]);
+  }, [cart, specialNote, customerName, customerPhone, selectedPaymentMethod, discountType, discountValue, selectedTable.id, managerSession?.restaurantId, ownerTemplate.showGst]);
 
   // Save order history helper
   const saveOrderHistory = (orders: OrderHistoryItem[]) => {
@@ -1150,6 +1171,8 @@ export default function ManagerOrderPortal() {
       setSpecialNote('');
       setCustomerName('');
       setCustomerPhone('');
+      setDiscountValue(0);
+      setIsDiscountOpen(false);
 
       const updated = { ...tableOrders };
       delete updated[selectedTable.id];
@@ -1170,7 +1193,13 @@ export default function ManagerOrderPortal() {
   // Dynamic Calculations for Active Cart (GST is disabled and not applicable if ownerTemplate.showGst === false or gstRate is 0 or no gstNumber)
   const isGstActive = ownerTemplate.showGst === true && Boolean(managerSession?.gstNumber && managerSession.gstNumber.trim().length > 0) && Number(managerSession?.gstRate ?? 5) > 0;
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const discount = subtotal > 500 ? 40 : 0;
+  const calculatedDiscount = Math.min(
+    subtotal,
+    discountType === 'percent'
+      ? Math.round((subtotal * (discountValue || 0)) / 100)
+      : Math.max(0, discountValue || 0)
+  );
+  const discount = calculatedDiscount;
   const taxable = Math.max(0, subtotal - discount);
   const cgst = isGstActive ? taxable * 0.025 : 0;
   const sgst = isGstActive ? taxable * 0.025 : 0;
@@ -1309,6 +1338,8 @@ export default function ManagerOrderPortal() {
     setSpecialNote('');
     setCustomerName('');
     setCustomerPhone('');
+    setDiscountValue(0);
+    setIsDiscountOpen(false);
 
     // 4. Set reprint target & switch to history
     setReprintTargetOrder(newOrder);
@@ -2782,6 +2813,126 @@ export default function ManagerOrderPortal() {
               </div>
             </div>
 
+            {/* Manager Discount / Offer Section */}
+            <div className="px-4 py-2.5 border-t border-[#E2E8F0] bg-white">
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setIsDiscountOpen(!isDiscountOpen)}
+                  className="flex items-center gap-1.5 text-xs font-bold text-[#475569] hover:text-[#0B1B29] transition-colors"
+                >
+                  <Percent className="w-3.5 h-3.5 text-[#16A34A]" />
+                  <span>Discount / Offer</span>
+                  {discountValue > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full bg-[#DCFCE7] text-[#15803D] font-extrabold text-[10px]">
+                      {discountType === 'percent' ? `${discountValue}% Off` : `₹${discountValue} Off`}
+                    </span>
+                  )}
+                </button>
+
+                {discountValue > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDiscountValue(0);
+                    }}
+                    className="text-[11px] font-semibold text-[#DC2626] hover:underline"
+                  >
+                    Remove
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsDiscountOpen(!isDiscountOpen)}
+                    className="text-[11px] font-semibold text-[#2563EB] hover:underline"
+                  >
+                    {isDiscountOpen ? 'Hide' : '+ Apply'}
+                  </button>
+                )}
+              </div>
+
+              {isDiscountOpen && (
+                <div className="mt-2.5 p-2.5 bg-[#F8FAFC] rounded-xl border border-[#E2E8F0] space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex bg-[#E2E8F0] p-0.5 rounded-lg text-xs font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setDiscountType('flat')}
+                        className={`px-2 py-1 rounded-md transition-all ${discountType === 'flat' ? 'bg-white text-[#0B1B29] shadow-xs' : 'text-[#64748B]'}`}
+                      >
+                        ₹ Flat
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDiscountType('percent')}
+                        className={`px-2 py-1 rounded-md transition-all ${discountType === 'percent' ? 'bg-white text-[#0B1B29] shadow-xs' : 'text-[#64748B]'}`}
+                      >
+                        % Off
+                      </button>
+                    </div>
+
+                    <div className="relative flex-1">
+                      <input
+                        type="number"
+                        min="0"
+                        max={discountType === 'percent' ? 100 : subtotal}
+                        value={discountValue || ''}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          if (discountType === 'percent') {
+                            setDiscountValue(Math.min(100, Math.max(0, val)));
+                          } else {
+                            setDiscountValue(Math.max(0, val));
+                          }
+                        }}
+                        placeholder={discountType === 'percent' ? "e.g. 10" : "e.g. 50"}
+                        className="w-full pl-2 pr-7 py-1 text-xs font-bold border border-[#CBD5E1] rounded-lg bg-white focus:outline-none focus:ring-1 focus:ring-[#2563EB]"
+                      />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-[#64748B]">
+                        {discountType === 'percent' ? '%' : '₹'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Preset chips */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] text-[#94A3B8] font-medium mr-1">Quick:</span>
+                    {discountType === 'percent' ? (
+                      [5, 10, 15, 20].map((pct) => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => setDiscountValue(pct)}
+                          className={`px-2 py-0.5 text-[11px] font-bold rounded-md border transition-all ${
+                            discountValue === pct
+                              ? 'bg-[#16A34A] text-white border-[#16A34A]'
+                              : 'bg-white text-[#475569] border-[#CBD5E1] hover:border-[#94A3B8]'
+                          }`}
+                        >
+                          {pct}%
+                        </button>
+                      ))
+                    ) : (
+                      [20, 50, 100, 200].map((amt) => (
+                        <button
+                          key={amt}
+                          type="button"
+                          onClick={() => setDiscountValue(amt)}
+                          className={`px-2 py-0.5 text-[11px] font-bold rounded-md border transition-all ${
+                            discountValue === amt
+                              ? 'bg-[#16A34A] text-white border-[#16A34A]'
+                              : 'bg-white text-[#475569] border-[#CBD5E1] hover:border-[#94A3B8]'
+                          }`}
+                        >
+                          ₹{amt}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Totals & Breakdown */}
             <div className="p-4 border-t border-[#E2E8F0] bg-[#F8FAFC] space-y-1.5 text-xs">
               <div className="flex justify-between text-[#64748B]">
@@ -2790,8 +2941,8 @@ export default function ManagerOrderPortal() {
               </div>
 
               {discount > 0 && (
-                <div className="flex justify-between text-[#D92F43] font-medium">
-                  <span>Promo Discount</span>
+                <div className="flex justify-between text-[#16A34A] font-bold">
+                  <span>Discount {discountType === 'percent' ? `(${discountValue}%)` : `(Flat ₹${discountValue})`}</span>
                   <span>- ₹{discount.toFixed(2)}</span>
                 </div>
               )}
